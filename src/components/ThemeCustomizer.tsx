@@ -34,6 +34,7 @@ export function ThemeCustomizer({
 }: {
   theme: ThemeState;
   onChange: (next: ThemeState) => void;
+  align?: "right" | "left";
 }) {
   const [open, setOpen] = useState(false);
   const [submenu, setSubmenu] = useState<SubmenuKey>(null);
