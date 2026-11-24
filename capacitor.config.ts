@@ -10,7 +10,7 @@ import type { CapacitorConfig } from "@capacitor/cli";
 const config: CapacitorConfig = {
   appId: "com.sse.vault",
   appName: "SSE Vault",
-  webDir: "out",
+  webDir: "www",
   server: {
     url: "https://sse-vault-amber.vercel.app",
     cleartext: false,

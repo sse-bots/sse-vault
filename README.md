@@ -9,3 +9,12 @@ A mobile-first Obsidian-Carbon & Warm-Ivory security vault built with Next.js 15
 - **Click-to-Consume Security Keys:** Tap any unused code to copy it (with optional 30-second clipboard auto-clear) and mask it permanently as exact-length dashes (`-------`), with Undo restore.
 - **Conditional Secret-Rotation Key Recovery (`hexcode`):** Decodes normally using `VAULT_ENCRYPTION_SECRET`; ONLY if the secret changes and fails to decode an entry, SSE Vault falls back to the entry's saved `hexcode` (or lets you paste an old 64-char hex key in `/vault/settings`) and offers 1-click re-encryption to the new secret.
 - **Live 2FA Wall, Security Audit, Password/Passphrase Generator, Privacy Policy & Terms of Service.**
+
+
+## Android APK
+
+The Capacitor Android shell and phone-friendly GitHub Actions workflow are
+documented in [ANDROID_SETUP.md](./ANDROID_SETUP.md). After configuring the
+one-time Android signing secrets, run **Actions → Build SSE Vault Android APK**
+or publish a GitHub Release to build a signed APK. The Android app loads the
+existing Vercel deployment, keeping server routes and credentials on the server.

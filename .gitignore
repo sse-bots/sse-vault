@@ -5,3 +5,8 @@ out/
 .env*.local
 *.log
 .DS_Store
+android/
+.gradle/
+*.jks
+*.keystore
+release-output/
