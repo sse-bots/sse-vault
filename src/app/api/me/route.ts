@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getVaultSession } from "@/lib/session";
+import { getVaultPinStatus } from "@/lib/vault-pin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,12 +16,13 @@ export async function GET() {
     const user = await getVaultSession();
     if (!user) {
       return NextResponse.json(
-        { authenticated: false, user: null },
+        { authenticated: false, user: null, pinStatus: null },
         { status: 200, headers: NO_CACHE }
       );
     }
+    const pinStatus = await getVaultPinStatus(user.userId);
     return NextResponse.json(
-      { authenticated: true, user },
+      { authenticated: true, user, pinStatus },
       { status: 200, headers: NO_CACHE }
     );
   } catch (err) {

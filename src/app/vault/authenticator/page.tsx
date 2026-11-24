@@ -2,14 +2,28 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowUpRight, Lock, LogIn, Plus, Search, Smartphone } from "lucide-react";
+import {
+  ArrowUpRight,
+  Lock,
+  LogIn,
+  Plus,
+  Search,
+  Smartphone,
+} from "lucide-react";
 import { useVault } from "@/components/VaultContext";
 import { SiteIcon } from "@/components/SiteIcon";
 import { TotpLiveWidget } from "@/components/TotpLiveWidget";
+import { KeyRecoveryBanner } from "@/components/KeyRecoveryBanner";
 
 export default function VaultAuthenticatorPage() {
-  const { user, authLoading, items, privacyBlur, openAddModal, showToast } =
-    useVault();
+  const {
+    user,
+    authLoading,
+    items,
+    privacyBlur,
+    openAddModal,
+    copySensitiveText,
+  } = useVault();
   const [query, setQuery] = useState("");
 
   const totpItems = useMemo(() => {
@@ -52,15 +66,17 @@ export default function VaultAuthenticatorPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+    <div className="space-y-5 sm:space-y-6">
+      <KeyRecoveryBanner />
+
+      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
         <div>
           <h1 className="vault-text-primary text-2xl font-black sm:text-3xl">
             Live 2FA Authenticator
           </h1>
           <p className="vault-text-muted mt-1 text-xs">
-            All {totpItems.length} real-time TOTP codes across your apps in one
-            place. Tap any code to copy instantly.
+            All {totpItems.length} real-time TOTP codes across your apps. Tap
+            any code to copy.
           </p>
         </div>
 
@@ -76,14 +92,14 @@ export default function VaultAuthenticatorPage() {
       </div>
 
       {totpItems.length === 0 ? (
-        <div className="vault-card rounded-3xl p-10 text-center">
+        <div className="vault-card rounded-3xl p-8 text-center sm:p-10">
           <Smartphone className="mx-auto mb-3 h-10 w-10 text-cyan-500" />
           <h2 className="vault-text-primary text-base font-extrabold">
             No TOTP secrets added yet
           </h2>
           <p className="vault-text-muted mx-auto mt-1.5 max-w-md text-xs">
-            Add a TOTP secret key or <code>otpauth://</code> URI to any account
-            to see live 30-second verification codes here.
+            Check the <strong>TOTP 2FA</strong> box when adding an account to
+            see live 30-second verification codes here.
           </p>
           <button
             type="button"
@@ -95,9 +111,12 @@ export default function VaultAuthenticatorPage() {
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
           {totpItems.map((item) => (
-            <div key={item.id} className="vault-card space-y-3 rounded-3xl p-4">
+            <div
+              key={item.id}
+              className="vault-card min-w-0 space-y-3 rounded-3xl p-4"
+            >
               <div className="flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-3">
                   <SiteIcon
@@ -118,7 +137,7 @@ export default function VaultAuthenticatorPage() {
                 <Link
                   href={`/vault/${encodeURIComponent(item.domainKey)}`}
                   title={`Open ${item.appName}`}
-                  className="vault-inset vault-text-muted rounded-xl p-1.5 hover:text-amber-500"
+                  className="vault-inset vault-text-muted shrink-0 rounded-xl p-1.5 hover:text-amber-500"
                 >
                   <ArrowUpRight className="h-3.5 w-3.5" />
                 </Link>
@@ -128,8 +147,8 @@ export default function VaultAuthenticatorPage() {
                 secret={item.totpSecret!}
                 privacyBlur={privacyBlur}
                 compact
-                onCopied={() =>
-                  showToast(`${item.appName} TOTP code copied!`)
+                onCopied={(code) =>
+                  copySensitiveText(code, `${item.appName} TOTP`)
                 }
               />
             </div>

@@ -92,6 +92,7 @@ export async function getVaultCollections() {
   return {
     db,
     vaultItems: db.collection<Document>("vault_items"),
+    vaultPinConfigs: db.collection<Document>("vault_pin_configs"),
     authUsers: db.collection<Document>("user"),
     authAccounts: db.collection<Document>("account"),
   };

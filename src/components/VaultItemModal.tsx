@@ -7,15 +7,18 @@ import {
   Eye,
   EyeOff,
   FileText,
+  Fingerprint,
   FolderPlus,
   Folders,
   Globe,
+  KeyRound,
   Loader2,
   Lock,
   Mail,
   Plus,
   RefreshCw,
   ShieldCheck,
+  Smartphone,
   Upload,
   User,
   X,
@@ -30,7 +33,13 @@ import {
   isUrlAllowedForDomain,
 } from "@/lib/domain";
 import { extractSecurityCodesFromText } from "@/lib/parse-codes";
-import type { VaultItemDTO } from "@/lib/vault-types";
+import {
+  OAUTH_PROVIDER_PRESETS,
+  VAULT_CATEGORIES,
+  type VaultAuthType,
+  type VaultCategory,
+  type VaultItemDTO,
+} from "@/lib/vault-types";
 
 function generateStrongPassword(len = 20): string {
   const chars =
@@ -52,14 +61,38 @@ export function VaultItemModal() {
     initialItem?.url || (lockedDomain ? `https://${lockedDomain}` : "")
   );
   const [label, setLabel] = useState(initialItem?.label || "");
+  const [category, setCategory] = useState<VaultCategory>(
+    initialItem?.category || "personal"
+  );
+
+  // Standard Password vs OAuth (Email Only)
+  const [authType, setAuthType] = useState<VaultAuthType>(
+    initialItem?.authType || "password"
+  );
+  const [oauthProvider, setOauthProvider] = useState(
+    initialItem?.oauthProvider || "Google"
+  );
+  const [customProvider, setCustomProvider] = useState(
+    initialItem?.oauthProvider &&
+      !OAUTH_PROVIDER_PRESETS.some((p) => p.name === initialItem.oauthProvider)
+      ? initialItem.oauthProvider
+      : ""
+  );
+
   const [email, setEmail] = useState(initialItem?.email || "");
   const [username, setUsername] = useState(initialItem?.username || "");
   const [password, setPassword] = useState(initialItem?.password || "");
   const [showPassword, setShowPassword] = useState(false);
-  const [totpSecret, setTotpSecret] = useState(initialItem?.totpSecret || "");
-  const [notes, setNotes] = useState(initialItem?.notes || "");
-  const [favorite, setFavorite] = useState(Boolean(initialItem?.favorite));
 
+  // Explicit Checkboxes for TOTP, Backup Security Keys & Passkey
+  const [enableTotp, setEnableTotp] = useState(
+    Boolean(initialItem?.totpSecret)
+  );
+  const [totpSecret, setTotpSecret] = useState(initialItem?.totpSecret || "");
+
+  const [enableSecurityCodes, setEnableSecurityCodes] = useState(
+    Boolean(initialItem && initialItem.securityCodes.length > 0)
+  );
   const [codesMode, setCodesMode] = useState<"keep" | "append" | "replace">(
     isEdit ? "keep" : "replace"
   );
@@ -67,6 +100,10 @@ export function VaultItemModal() {
   const [manualCodeInput, setManualCodeInput] = useState("");
   const [fileFeedback, setFileFeedback] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+
+  const [hasPasskey, setHasPasskey] = useState(Boolean(initialItem?.hasPasskey));
+  const [notes, setNotes] = useState(initialItem?.notes || "");
+  const [favorite, setFavorite] = useState(Boolean(initialItem?.favorite));
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -132,39 +169,65 @@ export function VaultItemModal() {
       );
       return;
     }
+    if (authType === "oauth" && !email.trim()) {
+      setError("Enter the email address used for OAuth sign-in.");
+      return;
+    }
 
     setSaving(true);
     setError(null);
+
+    const resolvedOAuthProvider =
+      oauthProvider === "Custom"
+        ? customProvider.trim() || "OAuth"
+        : oauthProvider;
+
+    const finalTotp = enableTotp ? totpSecret.trim() : "";
+
+    let finalCodesMode: "keep" | "append" | "replace" = "keep";
+    let finalCodes: string[] | undefined = undefined;
+
+    if (!enableSecurityCodes) {
+      if (isEdit) {
+        finalCodesMode = "replace";
+        finalCodes = [];
+      } else {
+        finalCodes = [];
+      }
+    } else if (parsedCodes.length > 0) {
+      finalCodesMode = isEdit ? codesMode : "replace";
+      finalCodes = parsedCodes;
+    } else if (!isEdit) {
+      finalCodes = [];
+    }
+
     try {
       const endpoint = isEdit ? `/api/vault/${initialItem!.id}` : "/api/vault";
       const method = isEdit ? "PATCH" : "POST";
 
-      const payload = isEdit
-        ? {
-            label,
-            url,
-            expectedDomain: lockedDomain || undefined,
-            email,
-            username,
-            password,
-            totpSecret,
-            notes,
-            favorite,
-            securityCodesMode: parsedCodes.length > 0 ? codesMode : "keep",
-            securityCodes: parsedCodes.length > 0 ? parsedCodes : undefined,
-          }
-        : {
-            label,
-            url,
-            expectedDomain: lockedDomain || undefined,
-            email,
-            username,
-            password,
-            totpSecret,
-            securityCodes: parsedCodes,
-            notes,
-            favorite,
-          };
+      const payload = {
+        label,
+        url,
+        expectedDomain: lockedDomain || undefined,
+        authType,
+        oauthProvider: authType === "oauth" ? resolvedOAuthProvider : "",
+        category,
+        hasPasskey,
+        email: email.trim(),
+        username: authType === "oauth" ? "" : username.trim(),
+        password: authType === "oauth" ? "" : password,
+        totpSecret: finalTotp,
+        notes,
+        favorite,
+        ...(isEdit
+          ? {
+              securityCodesMode: finalCodesMode,
+              securityCodes: finalCodes,
+            }
+          : {
+              securityCodes: finalCodes || [],
+            }),
+      };
 
       const res = await fetch(endpoint, {
         method,
@@ -198,13 +261,13 @@ export function VaultItemModal() {
   }
 
   return (
-    <div className="animate-vault-fade fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+    <div className="animate-vault-fade fixed inset-0 z-50 flex items-end justify-center bg-black/75 p-0 backdrop-blur-sm sm:items-center sm:p-4">
       <form
         onSubmit={handleSubmit}
-        className="animate-vault-modal vault-card max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-t-3xl p-5 shadow-2xl sm:rounded-3xl sm:p-6"
+        className="animate-vault-modal vault-card flex max-h-[92dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl shadow-2xl sm:rounded-3xl"
       >
-        {/* Header with Live Fetched Website Icon */}
-        <div className="mb-5 flex items-center justify-between gap-3">
+        {/* Sticky Header */}
+        <div className="vault-divider flex shrink-0 items-center justify-between gap-3 border-b px-4 py-4 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <SiteIcon
               domainOrUrl={url || lockedDomain || ""}
@@ -212,19 +275,19 @@ export function VaultItemModal() {
               size="md"
             />
             <div className="min-w-0">
-              <h2 className="vault-text-primary truncate text-lg font-extrabold">
+              <h2 className="vault-text-primary truncate text-base font-extrabold sm:text-lg">
                 {isEdit
-                  ? `Edit ${initialItem?.appName} Account`
+                  ? `Edit ${initialItem?.appName}`
                   : lockedDomain
                     ? `Add ${lockedAppName} Account`
                     : detectedAppName
                       ? `Save to ${detectedAppName}`
-                      : "Add New Vault Entry"}
+                      : "New Vault Entry"}
               </h2>
               <p className="vault-text-muted truncate text-[11px]">
                 {lockedDomain
-                  ? `Strictly locked to ${lockedDomain} URLs`
-                  : "Automatically groups by website domain & fetches its real icon"}
+                  ? `Only ${lockedDomain} URLs allowed here`
+                  : "Auto-groups by domain & fetches website icon"}
               </p>
             </div>
           </div>
@@ -232,30 +295,31 @@ export function VaultItemModal() {
           <button
             type="button"
             onClick={closeModal}
-            className="vault-inset vault-text-muted rounded-xl p-2 hover:text-amber-500"
+            className="vault-inset vault-text-muted shrink-0 rounded-xl p-2 hover:text-amber-500"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        {error && (
-          <div className="mb-4 flex items-start gap-2 rounded-2xl border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-400">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
+        {/* Scrollable Body */}
+        <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-6">
+          {error && (
+            <div className="flex items-start gap-2 rounded-2xl border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-400">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
 
-        <div className="space-y-4">
-          {/* 1. Website URL + Smart Segregation Indicator */}
+          {/* 1. Website URL + Account Label */}
           <div className="space-y-2">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
-                <div className="mb-1 flex items-center justify-between">
+                <div className="mb-1 flex items-center justify-between gap-2">
                   <label className="vault-text-secondary text-xs font-semibold">
                     Website URL *
                   </label>
                   {lockedDomain && (
-                    <span className="rounded-full bg-amber-500/15 px-2 py-0.5 font-mono text-[10px] font-bold text-amber-500">
+                    <span className="truncate rounded-full bg-amber-500/15 px-2 py-0.5 font-mono text-[10px] font-bold text-amber-500">
                       Only {lockedDomain}
                     </span>
                   )}
@@ -285,13 +349,12 @@ export function VaultItemModal() {
                 <input
                   value={label}
                   onChange={(e) => setLabel(e.target.value)}
-                  placeholder="e.g. Personal, Work, Bot Dev"
+                  placeholder="e.g. Personal, Dev, Gaming"
                   className="vault-input w-full rounded-xl px-3.5 py-2.5 text-xs"
                 />
               </div>
             </div>
 
-            {/* Live Domain Segregation Feedback Pill */}
             {domainMismatch ? (
               <div className="flex items-center gap-2 rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-[11px] font-semibold text-rose-400">
                 <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
@@ -301,306 +364,500 @@ export function VaultItemModal() {
                 </span>
               </div>
             ) : detectedDomain && !isEdit ? (
-              <div className="vault-inset flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-[11px]">
-                <div className="flex min-w-0 items-center gap-2">
-                  {matchedExistingGroup ? (
-                    <>
-                      <Folders className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
-                      <span className="vault-text-secondary truncate">
-                        Existing{" "}
-                        <strong className="vault-text-primary">
-                          {matchedExistingGroup.appName}
-                        </strong>{" "}
-                        app found ({matchedExistingGroup.accountCount} account
-                        {matchedExistingGroup.accountCount === 1 ? "" : "s"}) —
-                        will add inside it.
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <FolderPlus className="h-3.5 w-3.5 shrink-0 text-amber-500" />
-                      <span className="vault-text-secondary truncate">
-                        Will create a new{" "}
-                        <strong className="vault-text-primary">
-                          {detectedAppName}
-                        </strong>{" "}
-                        (<code>{detectedDomain}</code>) app group.
-                      </span>
-                    </>
-                  )}
-                </div>
+              <div className="vault-inset flex items-center gap-2 rounded-xl px-3 py-2 text-[11px]">
+                {matchedExistingGroup ? (
+                  <>
+                    <Folders className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
+                    <span className="vault-text-secondary min-w-0 truncate">
+                      Existing{" "}
+                      <strong className="vault-text-primary">
+                        {matchedExistingGroup.appName}
+                      </strong>{" "}
+                      group ({matchedExistingGroup.accountCount}) — will add
+                      inside it.
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <FolderPlus className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                    <span className="vault-text-secondary min-w-0 truncate">
+                      Will create new{" "}
+                      <strong className="vault-text-primary">
+                        {detectedAppName}
+                      </strong>{" "}
+                      (<code>{detectedDomain}</code>) app group.
+                    </span>
+                  </>
+                )}
               </div>
             ) : null}
           </div>
 
-          {/* 2. Email & Username (Either or Both) */}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div>
-              <label className="vault-text-secondary mb-1 block text-xs font-semibold">
-                Email (optional)
-              </label>
-              <div className="relative">
-                <Mail className="vault-text-muted pointer-events-none absolute left-3 top-2.5 h-4 w-4" />
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  className="vault-input w-full rounded-xl py-2.5 pl-9 pr-3 text-xs"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="vault-text-secondary mb-1 block text-xs font-semibold">
-                Username (optional — use either or both)
-              </label>
-              <div className="relative">
-                <User className="vault-text-muted pointer-events-none absolute left-3 top-2.5 h-4 w-4" />
-                <input
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="e.g. sseofficial"
-                  className="vault-input w-full rounded-xl py-2.5 pl-9 pr-3 text-xs"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* 3. Password + Live Strength Bar + Generator */}
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="vault-text-secondary text-xs font-semibold">
-                Password
-              </label>
+          {/* 2. Login Method Switcher: Password Login vs OAuth Sign-In */}
+          <div className="space-y-3">
+            <label className="vault-text-secondary block text-xs font-semibold">
+              Login Method
+            </label>
+            <div className="vault-inset grid grid-cols-2 gap-1.5 rounded-2xl p-1.5">
               <button
                 type="button"
-                onClick={() => {
-                  setPassword(generateStrongPassword(20));
-                  setShowPassword(true);
-                }}
-                className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-500 hover:underline"
+                onClick={() => setAuthType("password")}
+                className={`flex items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-bold transition ${
+                  authType === "password"
+                    ? "bg-amber-500 text-zinc-950 shadow-sm"
+                    : "vault-text-secondary hover:text-amber-500"
+                }`}
               >
-                <RefreshCw className="h-3 w-3" />
-                Generate Strong
+                <Lock className="h-3.5 w-3.5" />
+                Password Login
               </button>
-            </div>
-            <div className="relative">
-              <Lock className="vault-text-muted pointer-events-none absolute left-3 top-2.5 h-4 w-4" />
-              <input
-                type={showPassword ? "text" : "password"}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Account password"
-                className="vault-input w-full rounded-xl py-2.5 pl-9 pr-10 font-mono text-xs"
-              />
               <button
                 type="button"
-                onClick={() => setShowPassword((v) => !v)}
-                className="vault-text-muted absolute right-2.5 top-2 rounded-lg p-1 hover:text-amber-500"
+                onClick={() => setAuthType("oauth")}
+                className={`flex items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-bold transition ${
+                  authType === "oauth"
+                    ? "bg-amber-500 text-zinc-950 shadow-sm"
+                    : "vault-text-secondary hover:text-amber-500"
+                }`}
               >
-                {showPassword ? (
-                  <EyeOff className="h-4 w-4" />
-                ) : (
-                  <Eye className="h-4 w-4" />
-                )}
+                <ShieldCheck className="h-3.5 w-3.5" />
+                OAuth (Email Only)
               </button>
             </div>
 
-            {password && (
-              <div className="flex items-center gap-2 pt-0.5">
-                <div className="flex flex-1 gap-1">
-                  {[1, 2, 3, 4].map((lvl) => (
-                    <div
-                      key={lvl}
-                      className="h-1 flex-1 rounded-full transition-all"
-                      style={{
-                        backgroundColor:
-                          strength.score >= lvl
-                            ? strength.color
-                            : "var(--v-border-strong)",
-                      }}
-                    />
-                  ))}
-                </div>
-                <span
-                  className="text-[10px] font-bold uppercase tracking-wider"
-                  style={{ color: strength.color }}
-                >
-                  {strength.label}
-                </span>
-              </div>
-            )}
-          </div>
-
-          {/* 4. TOTP Secret + Live Preview */}
-          <div className="space-y-2.5">
-            <div>
-              <label className="vault-text-secondary mb-1 block text-xs font-semibold">
-                TOTP Secret Key or <code>otpauth://</code> URI (optional)
-              </label>
-              <input
-                value={totpSecret}
-                onChange={(e) => setTotpSecret(e.target.value)}
-                placeholder="e.g. JBSWY3DPEHPK3PXP or otpauth://totp/..."
-                className="vault-input w-full rounded-xl px-3.5 py-2.5 font-mono text-xs"
-              />
-            </div>
-
-            {totpSecret.trim().length >= 8 && (
-              <TotpLiveWidget secret={totpSecret} compact />
-            )}
-          </div>
-
-          {/* 5. Zero-Storage .txt Security Key Importer */}
-          <div className="vault-inset space-y-3 rounded-2xl p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <div className="vault-text-primary flex items-center gap-1.5 text-xs font-bold">
-                  <FileText className="h-4 w-4 text-amber-500" />
-                  Backup Security Keys (.txt Importer)
-                </div>
-                <p className="vault-text-muted mt-0.5 text-[11px]">
-                  Upload any <code>.txt</code> codes file — codes are extracted
-                  in memory &amp; encrypted individually.{" "}
-                  <strong className="text-emerald-500">
-                    The .txt file is never stored.
-                  </strong>
-                </p>
-              </div>
-              {isEdit && initialItem && initialItem.securityCodes.length > 0 && (
-                <div className="vault-card flex items-center gap-1 rounded-xl p-1 text-[10px] font-bold">
-                  {(["keep", "append", "replace"] as const).map((m) => (
+            {authType === "oauth" ? (
+              <div className="vault-inset space-y-3 rounded-2xl p-3.5">
+                <div>
+                  <label className="vault-text-secondary mb-2 block text-[11px] font-bold uppercase tracking-wider">
+                    Signed In With Provider
+                  </label>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {OAUTH_PROVIDER_PRESETS.map((p) => {
+                      const active = oauthProvider === p.name;
+                      return (
+                        <button
+                          key={p.name}
+                          type="button"
+                          onClick={() => setOauthProvider(p.name)}
+                          className={`flex items-center gap-2 rounded-xl border px-2.5 py-2 text-left text-xs font-bold transition ${
+                            active
+                              ? "border-amber-500 bg-amber-500/15 text-amber-500"
+                              : "vault-card vault-text-secondary hover:border-amber-500/50"
+                          }`}
+                        >
+                          <SiteIcon
+                            domainOrUrl={p.domain}
+                            label={p.name}
+                            size="sm"
+                            className="!h-6 !w-6 !rounded-lg"
+                          />
+                          <span className="truncate">{p.name}</span>
+                        </button>
+                      );
+                    })}
                     <button
-                      key={m}
                       type="button"
-                      onClick={() => setCodesMode(m)}
-                      className={`rounded-lg px-2 py-1 capitalize ${
-                        codesMode === m
-                          ? "bg-amber-500 text-zinc-950"
-                          : "vault-text-muted"
+                      onClick={() => setOauthProvider("Custom")}
+                      className={`flex items-center justify-center gap-1.5 rounded-xl border px-2.5 py-2 text-xs font-bold transition ${
+                        oauthProvider === "Custom"
+                          ? "border-amber-500 bg-amber-500/15 text-amber-500"
+                          : "vault-card vault-text-secondary hover:border-amber-500/50"
                       }`}
                     >
-                      {m}
+                      <Globe className="h-3.5 w-3.5" />
+                      Custom
                     </button>
-                  ))}
+                  </div>
                 </div>
-              )}
+
+                {oauthProvider === "Custom" && (
+                  <input
+                    required
+                    value={customProvider}
+                    onChange={(e) => setCustomProvider(e.target.value)}
+                    placeholder="Provider name (e.g. GitLab, Steam, Twitch)"
+                    className="vault-input w-full rounded-xl px-3.5 py-2 text-xs"
+                  />
+                )}
+
+                <div>
+                  <label className="vault-text-secondary mb-1 block text-xs font-semibold">
+                    OAuth Account Email *
+                  </label>
+                  <div className="relative">
+                    <Mail className="vault-text-muted pointer-events-none absolute left-3 top-2.5 h-4 w-4" />
+                    <input
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="Email used with this OAuth provider"
+                      className="vault-input w-full rounded-xl py-2.5 pl-9 pr-3 text-xs"
+                    />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="vault-text-secondary mb-1 block text-xs font-semibold">
+                      Email (optional)
+                    </label>
+                    <div className="relative">
+                      <Mail className="vault-text-muted pointer-events-none absolute left-3 top-2.5 h-4 w-4" />
+                      <input
+                        type="email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="you@example.com"
+                        className="vault-input w-full rounded-xl py-2.5 pl-9 pr-3 text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="vault-text-secondary mb-1 block text-xs font-semibold">
+                      Username (optional — either or both)
+                    </label>
+                    <div className="relative">
+                      <User className="vault-text-muted pointer-events-none absolute left-3 top-2.5 h-4 w-4" />
+                      <input
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
+                        placeholder="e.g. sseofficial"
+                        className="vault-input w-full rounded-xl py-2.5 pl-9 pr-3 text-xs"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Password + Strength + Generator */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="vault-text-secondary text-xs font-semibold">
+                      Password
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPassword(generateStrongPassword(20));
+                        setShowPassword(true);
+                      }}
+                      className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-500 hover:underline"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                      Generate Strong
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <Lock className="vault-text-muted pointer-events-none absolute left-3 top-2.5 h-4 w-4" />
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Account password"
+                      className="vault-input w-full rounded-xl py-2.5 pl-9 pr-10 font-mono text-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      className="vault-text-muted absolute right-2.5 top-2 rounded-lg p-1 hover:text-amber-500"
+                    >
+                      {showPassword ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+
+                  {password && (
+                    <div className="flex items-center gap-2 pt-0.5">
+                      <div className="flex flex-1 gap-1">
+                        {[1, 2, 3, 4].map((lvl) => (
+                          <div
+                            key={lvl}
+                            className="h-1 flex-1 rounded-full transition-all"
+                            style={{
+                              backgroundColor:
+                                strength.score >= lvl
+                                  ? strength.color
+                                  : "var(--v-border-strong)",
+                            }}
+                          />
+                        ))}
+                      </div>
+                      <span
+                        className="text-[10px] font-bold uppercase tracking-wider"
+                        style={{ color: strength.color }}
+                      >
+                        {strength.label}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 3. Checkboxes for TOTP, Backup Security Codes & Passkey */}
+          <div className="space-y-3">
+            <label className="vault-text-secondary block text-xs font-semibold">
+              Security Extras (Toggle What You Need)
+            </label>
+
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <label
+                className={`flex cursor-pointer items-center gap-2.5 rounded-2xl border p-3 text-xs font-bold transition ${
+                  enableTotp
+                    ? "border-cyan-500/60 bg-cyan-500/10 text-cyan-500"
+                    : "vault-inset vault-text-secondary"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={enableTotp}
+                  onChange={(e) => setEnableTotp(e.target.checked)}
+                  className="h-4 w-4 shrink-0 accent-cyan-500"
+                />
+                <Smartphone className="h-4 w-4 shrink-0" />
+                <span className="truncate">TOTP 2FA</span>
+              </label>
+
+              <label
+                className={`flex cursor-pointer items-center gap-2.5 rounded-2xl border p-3 text-xs font-bold transition ${
+                  enableSecurityCodes
+                    ? "border-amber-500/60 bg-amber-500/10 text-amber-500"
+                    : "vault-inset vault-text-secondary"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={enableSecurityCodes}
+                  onChange={(e) => setEnableSecurityCodes(e.target.checked)}
+                  className="h-4 w-4 shrink-0 accent-amber-500"
+                />
+                <KeyRound className="h-4 w-4 shrink-0" />
+                <span className="truncate">Security Keys</span>
+              </label>
+
+              <label
+                className={`flex cursor-pointer items-center gap-2.5 rounded-2xl border p-3 text-xs font-bold transition ${
+                  hasPasskey
+                    ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-500"
+                    : "vault-inset vault-text-secondary"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={hasPasskey}
+                  onChange={(e) => setHasPasskey(e.target.checked)}
+                  className="h-4 w-4 shrink-0 accent-emerald-500"
+                />
+                <Fingerprint className="h-4 w-4 shrink-0" />
+                <span className="truncate">Passkey Active</span>
+              </label>
             </div>
 
-            <div
-              onDragOver={(e) => {
-                e.preventDefault();
-                setIsDragging(true);
-              }}
-              onDragLeave={() => setIsDragging(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setIsDragging(false);
-                const dropped = e.dataTransfer.files?.[0];
-                if (dropped) processTxtFile(dropped);
-              }}
-              onClick={() => fileInputRef.current?.click()}
-              className={`flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed p-5 text-center transition ${
-                isDragging
-                  ? "border-amber-500 bg-amber-500/10"
-                  : "border-zinc-500/30 hover:border-amber-500/70"
-              }`}
-            >
-              <Upload className="mb-2 h-6 w-6 text-amber-500" />
-              <div className="vault-text-primary text-xs font-bold">
-                Tap or Drop <code>.txt</code> Backup Codes File
-              </div>
-              <div className="vault-text-muted mt-0.5 text-[11px]">
-                Auto-separates GitHub, Discord, Google &amp; SSE recovery kits
-              </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".txt,text/plain"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) processTxtFile(f);
-                }}
-              />
-            </div>
-
-            {fileFeedback && (
-              <div className="flex items-start gap-2 rounded-xl border border-emerald-500/35 bg-emerald-500/10 p-2.5 text-[11px] text-emerald-500">
-                <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                <span>{fileFeedback}</span>
+            {/* Conditional TOTP Secret Section */}
+            {enableTotp && (
+              <div className="vault-inset space-y-2.5 rounded-2xl p-3.5">
+                <div>
+                  <label className="vault-text-secondary mb-1 block text-xs font-semibold">
+                    TOTP Secret Key or <code>otpauth://</code> URI
+                  </label>
+                  <input
+                    value={totpSecret}
+                    onChange={(e) => setTotpSecret(e.target.value)}
+                    placeholder="e.g. JBSWY3DPEHPK3PXP or otpauth://totp/..."
+                    className="vault-input w-full rounded-xl px-3.5 py-2.5 font-mono text-xs"
+                  />
+                </div>
+                {totpSecret.trim().length >= 8 && (
+                  <TotpLiveWidget secret={totpSecret} compact />
+                )}
               </div>
             )}
 
-            <div className="flex gap-2">
-              <input
-                value={manualCodeInput}
-                onChange={(e) => setManualCodeInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    handleAddManualCodes();
-                  }
-                }}
-                placeholder="Or paste / type security code(s) manually..."
-                className="vault-input flex-1 rounded-xl px-3 py-2 font-mono text-xs"
-              />
-              <button
-                type="button"
-                onClick={handleAddManualCodes}
-                className="vault-card vault-text-primary inline-flex items-center gap-1 rounded-xl px-3 py-2 text-xs font-bold hover:border-amber-500"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Add
-              </button>
-            </div>
+            {/* Conditional Security Codes (.txt Zero-Storage Importer) */}
+            {enableSecurityCodes && (
+              <div className="vault-inset space-y-3 rounded-2xl p-3.5 sm:p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="vault-text-primary flex items-center gap-1.5 text-xs font-bold">
+                      <FileText className="h-4 w-4 text-amber-500" />
+                      Backup Security Keys (.txt Importer)
+                    </div>
+                    <p className="vault-text-muted mt-0.5 text-[11px]">
+                      Parsed in memory —{" "}
+                      <strong className="text-emerald-500">
+                        the .txt file is never stored.
+                      </strong>
+                    </p>
+                  </div>
+                  {isEdit &&
+                    initialItem &&
+                    initialItem.securityCodes.length > 0 && (
+                      <div className="vault-card flex items-center gap-1 rounded-xl p-1 text-[10px] font-bold">
+                        {(["keep", "append", "replace"] as const).map((m) => (
+                          <button
+                            key={m}
+                            type="button"
+                            onClick={() => setCodesMode(m)}
+                            className={`rounded-lg px-2 py-1 capitalize ${
+                              codesMode === m
+                                ? "bg-amber-500 text-zinc-950"
+                                : "vault-text-muted"
+                            }`}
+                          >
+                            {m}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                </div>
 
-            {parsedCodes.length > 0 && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-[11px]">
-                  <span className="vault-text-secondary font-semibold">
-                    Separated Codes Ready ({parsedCodes.length}):
-                  </span>
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setIsDragging(true);
+                  }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDragging(false);
+                    const dropped = e.dataTransfer.files?.[0];
+                    if (dropped) processTxtFile(dropped);
+                  }}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed p-4 text-center transition ${
+                    isDragging
+                      ? "border-amber-500 bg-amber-500/10"
+                      : "border-zinc-500/30 hover:border-amber-500/70"
+                  }`}
+                >
+                  <Upload className="mb-1.5 h-5 w-5 text-amber-500" />
+                  <div className="vault-text-primary text-xs font-bold">
+                    Tap or Drop <code>.txt</code> Backup Codes File
+                  </div>
+                  <div className="vault-text-muted mt-0.5 text-[11px]">
+                    GitHub, Discord, Google &amp; SSE recovery files
+                  </div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".txt,text/plain"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) processTxtFile(f);
+                    }}
+                  />
+                </div>
+
+                {fileFeedback && (
+                  <div className="flex items-start gap-2 rounded-xl border border-emerald-500/35 bg-emerald-500/10 p-2.5 text-[11px] text-emerald-500">
+                    <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>{fileFeedback}</span>
+                  </div>
+                )}
+
+                <div className="flex gap-2">
+                  <input
+                    value={manualCodeInput}
+                    onChange={(e) => setManualCodeInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleAddManualCodes();
+                      }
+                    }}
+                    placeholder="Or paste / type security code(s)..."
+                    className="vault-input min-w-0 flex-1 rounded-xl px-3 py-2 font-mono text-xs"
+                  />
                   <button
                     type="button"
-                    onClick={() => {
-                      setParsedCodes([]);
-                      setFileFeedback(null);
-                    }}
-                    className="font-semibold text-rose-500 hover:underline"
+                    onClick={handleAddManualCodes}
+                    className="vault-card vault-text-primary inline-flex shrink-0 items-center gap-1 rounded-xl px-3 py-2 text-xs font-bold hover:border-amber-500"
                   >
-                    Clear All
+                    <Plus className="h-3.5 w-3.5" />
+                    Add
                   </button>
                 </div>
 
-                <div className="vault-card flex max-h-40 flex-wrap gap-1.5 overflow-y-auto rounded-xl p-2.5">
-                  {parsedCodes.map((code) => (
-                    <span
-                      key={code}
-                      className="vault-inset inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 font-mono text-xs font-semibold text-amber-500"
-                    >
-                      <span>{code}</span>
+                {parsedCodes.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="vault-text-secondary font-semibold">
+                        Separated Codes Ready ({parsedCodes.length}):
+                      </span>
                       <button
                         type="button"
-                        onClick={() =>
-                          setParsedCodes((prev) =>
-                            prev.filter((c) => c !== code)
-                          )
-                        }
-                        className="vault-text-muted hover:text-rose-500"
+                        onClick={() => {
+                          setParsedCodes([]);
+                          setFileFeedback(null);
+                        }}
+                        className="font-semibold text-rose-500 hover:underline"
                       >
-                        <X className="h-3 w-3" />
+                        Clear All
                       </button>
-                    </span>
-                  ))}
-                </div>
+                    </div>
+
+                    <div className="vault-card flex max-h-36 flex-wrap gap-1.5 overflow-y-auto rounded-xl p-2.5">
+                      {parsedCodes.map((code) => (
+                        <span
+                          key={code}
+                          className="vault-inset inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 font-mono text-xs font-semibold text-amber-500"
+                        >
+                          <span>{code}</span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setParsedCodes((prev) =>
+                                prev.filter((c) => c !== code)
+                              )
+                            }
+                            className="vault-text-muted hover:text-rose-500"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
 
-          {/* 6. Notes & Pin */}
+          {/* 4. Category Pills + Notes + Favorite */}
           <div className="space-y-3">
+            <div>
+              <label className="vault-text-secondary mb-1.5 block text-xs font-semibold">
+                Category
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {VAULT_CATEGORIES.map((cat) => {
+                  const active = category === cat.id;
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => setCategory(cat.id)}
+                      className={`rounded-full border px-3 py-1 text-[11px] font-bold transition ${
+                        active
+                          ? "border-amber-500 bg-amber-500/15 text-amber-500"
+                          : "vault-inset vault-text-muted hover:text-amber-500"
+                      }`}
+                    >
+                      {cat.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             <div>
               <label className="vault-text-secondary mb-1 block text-xs font-semibold">
                 Encrypted Notes (optional)
@@ -610,7 +867,7 @@ export function VaultItemModal() {
                 maxLength={1000}
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="Any extra recovery notes or security question hints..."
+                placeholder="Recovery hints, security questions, billing notes..."
                 className="vault-input w-full rounded-xl px-3.5 py-2 text-xs"
               />
             </div>
@@ -627,7 +884,8 @@ export function VaultItemModal() {
           </div>
         </div>
 
-        <div className="vault-divider mt-6 flex items-center justify-end gap-2.5 border-t pt-4">
+        {/* Sticky Footer */}
+        <div className="vault-divider flex shrink-0 items-center justify-end gap-2.5 border-t px-4 py-3.5 sm:px-6">
           <button
             type="button"
             onClick={closeModal}

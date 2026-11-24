@@ -8,13 +8,17 @@ import {
   ExternalLink,
   Eye,
   EyeOff,
+  FileText,
   KeyRound,
   LayoutGrid,
+  Lock,
   LogIn,
   LogOut,
   Moon,
   Plus,
+  Scale,
   Search,
+  Settings,
   ShieldAlert,
   ShieldCheck,
   Smartphone,
@@ -23,6 +27,8 @@ import {
 import { signOut } from "@/lib/auth-client";
 import { useVault } from "@/components/VaultContext";
 import { VaultItemModal } from "@/components/VaultItemModal";
+import { VaultImportExportModal } from "@/components/VaultImportExportModal";
+import { VaultPinGate } from "@/components/VaultPinGate";
 import { SpotlightModal } from "@/components/SpotlightModal";
 
 const ACCOUNTS_URL = (
@@ -34,11 +40,17 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
   const {
     user,
     authLoading,
+    isVaultUnlocked,
+    lockVault,
     privacyBlur,
     setPrivacyBlur,
+    clipboardCountdown,
+    lockedCount,
+    recoveredCount,
     setSpotlightOpen,
     modal,
     openAddModal,
+    importExportModal,
     clearUser,
     toast,
   } = useVault();
@@ -69,6 +81,12 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
   async function handleSignOut() {
     setUserMenuOpen(false);
     try {
+      await fetch("/api/vault/pin", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "lock" }),
+      }).catch(() => {});
       await signOut();
     } finally {
       clearUser();
@@ -76,11 +94,22 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
     }
   }
 
-  // Detect if user is currently inside a domain page (/vault/[domain]) so "+ Add" locks to that app!
+  const isVaultRoute = pathname === "/vault" || pathname.startsWith("/vault/");
+  const mustShowPinGate = Boolean(
+    !authLoading && user && isVaultRoute && !isVaultUnlocked
+  );
+
   const currentLockedDomain = (() => {
     if (!pathname.startsWith("/vault/")) return null;
     const seg = pathname.slice("/vault/".length).split("/")[0];
-    if (!seg || seg === "authenticator" || seg === "health") return null;
+    if (
+      !seg ||
+      seg === "authenticator" ||
+      seg === "health" ||
+      seg === "settings"
+    ) {
+      return null;
+    }
     try {
       return decodeURIComponent(seg);
     } catch {
@@ -92,37 +121,43 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
     pathname === "/vault" ||
     (pathname.startsWith("/vault/") &&
       !pathname.startsWith("/vault/authenticator") &&
-      !pathname.startsWith("/vault/health"));
+      !pathname.startsWith("/vault/health") &&
+      !pathname.startsWith("/vault/settings"));
+
+  const hasKeyAlert = lockedCount > 0 || recoveredCount > 0;
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-screen w-full flex-col overflow-x-hidden">
       {/* Sticky Frosted Top Command Bar */}
-      <header className="vault-header sticky top-0 z-40 h-16">
-        <div className="mx-auto flex h-full max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
-          {/* Left: Distinct Titanium-Gold Vault Brand */}
-          <Link href={user ? "/vault" : "/"} className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 text-zinc-950 shadow-md shadow-amber-500/25">
-              <KeyRound className="h-5 w-5" />
+      <header className="vault-header sticky top-0 z-40 h-14 sm:h-16">
+        <div className="mx-auto flex h-full max-w-6xl items-center justify-between gap-2 px-3 sm:gap-3 sm:px-6">
+          {/* Brand */}
+          <Link
+            href={user ? "/vault" : "/"}
+            className="flex min-w-0 items-center gap-2 sm:gap-2.5"
+          >
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 text-zinc-950 shadow-md shadow-amber-500/25 sm:h-9 sm:w-9">
+              <KeyRound className="h-4 w-4 sm:h-5 sm:w-5" />
             </div>
-            <div className="leading-tight">
+            <div className="min-w-0 leading-tight">
               <div className="vault-text-primary flex items-center gap-1.5 text-sm font-black tracking-tight">
-                <span>SSE Vault</span>
+                <span className="truncate">SSE Vault</span>
                 <span className="hidden rounded bg-amber-500/15 px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase text-amber-500 sm:inline">
-                  AES-256
+                  PIN + AES
                 </span>
               </div>
-              <div className="vault-text-muted text-[10px] font-medium">
+              <div className="vault-text-muted hidden text-[10px] font-medium min-[380px]:block">
                 Passwords · TOTP · Keys
               </div>
             </div>
           </Link>
 
-          {/* Center (Desktop): Pill Segmented Navigation */}
-          {user && (
+          {/* Desktop Center Pill Navigation (only shown when vault is unlocked!) */}
+          {isVaultUnlocked && (
             <nav className="vault-inset hidden items-center gap-1 rounded-full p-1 md:flex">
               <Link
                 href="/vault"
-                className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold transition ${
+                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition ${
                   isAppsActive
                     ? "bg-amber-500 text-zinc-950 shadow-sm"
                     : "vault-text-secondary hover:text-amber-500"
@@ -133,7 +168,7 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
               </Link>
               <Link
                 href="/vault/authenticator"
-                className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold transition ${
+                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition ${
                   pathname.startsWith("/vault/authenticator")
                     ? "bg-amber-500 text-zinc-950 shadow-sm"
                     : "vault-text-secondary hover:text-amber-500"
@@ -144,29 +179,43 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
               </Link>
               <Link
                 href="/vault/health"
-                className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold transition ${
+                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition ${
                   pathname.startsWith("/vault/health")
                     ? "bg-amber-500 text-zinc-950 shadow-sm"
                     : "vault-text-secondary hover:text-amber-500"
                 }`}
               >
                 <ShieldCheck className="h-3.5 w-3.5" />
-                Security Check
+                Health
+              </Link>
+              <Link
+                href="/vault/settings"
+                className={`relative inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition ${
+                  pathname.startsWith("/vault/settings")
+                    ? "bg-amber-500 text-zinc-950 shadow-sm"
+                    : "vault-text-secondary hover:text-amber-500"
+                }`}
+              >
+                <Settings className="h-3.5 w-3.5" />
+                Settings
+                {hasKeyAlert && (
+                  <span className="h-2 w-2 rounded-full bg-rose-500" />
+                )}
               </Link>
             </nav>
           )}
 
           {/* Right Action Controls */}
-          <div className="flex items-center gap-2">
-            {user && (
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+            {isVaultUnlocked && (
               <>
                 <button
                   type="button"
                   onClick={() => setSpotlightOpen(true)}
                   title="Search Vault (Ctrl+K)"
-                  className="vault-inset vault-text-muted inline-flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-medium transition hover:border-amber-500/50 hover:text-amber-500 sm:px-3"
+                  className="vault-inset vault-text-muted inline-flex items-center gap-2 rounded-xl p-2 text-xs font-medium transition hover:border-amber-500/50 hover:text-amber-500 sm:px-3"
                 >
-                  <Search className="h-3.5 w-3.5" />
+                  <Search className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
                   <span className="hidden lg:inline">Search...</span>
                   <kbd className="vault-card hidden rounded px-1.5 py-0.5 font-mono text-[10px] lg:inline">
                     ⌘K
@@ -176,7 +225,7 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
                 <button
                   type="button"
                   onClick={() => setPrivacyBlur((v) => !v)}
-                  title={privacyBlur ? "Disable Privacy Blur" : "Blur All Secrets"}
+                  title={privacyBlur ? "Unblur Secrets" : "Privacy Blur"}
                   className={`rounded-xl border p-2 transition ${
                     privacyBlur
                       ? "border-amber-500 bg-amber-500/15 text-amber-500"
@@ -188,6 +237,15 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
                   ) : (
                     <EyeOff className="h-4 w-4" />
                   )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={lockVault}
+                  title="Lock Vault Now (Require 6-Digit PIN)"
+                  className="vault-inset vault-text-muted rounded-xl p-2 transition hover:border-rose-500/50 hover:text-rose-500"
+                >
+                  <Lock className="h-4 w-4" />
                 </button>
 
                 <button
@@ -215,13 +273,13 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
             </button>
 
             {authLoading ? (
-              <div className="h-9 w-9 animate-pulse rounded-full bg-zinc-500/20" />
+              <div className="h-8 w-8 animate-pulse rounded-full bg-zinc-500/20 sm:h-9 sm:w-9" />
             ) : user ? (
               <div className="relative">
                 <button
                   type="button"
                   onClick={() => setUserMenuOpen((v) => !v)}
-                  className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border-2 border-amber-500/50 bg-amber-500/15 text-xs font-extrabold text-amber-500"
+                  className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border-2 border-amber-500/50 bg-amber-500/15 text-xs font-extrabold text-amber-500 sm:h-9 sm:w-9"
                 >
                   {user.image ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -250,7 +308,29 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
                           {user.email}
                         </div>
                       </div>
-                      <div className="mt-1 space-y-1">
+                      <div className="mt-1 space-y-0.5">
+                        {isVaultUnlocked && (
+                          <>
+                            <Link
+                              href="/vault/settings"
+                              className="vault-text-secondary flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium hover:bg-amber-500/10"
+                            >
+                              <Settings className="h-3.5 w-3.5" />
+                              Vault Settings &amp; PIN
+                            </Link>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setUserMenuOpen(false);
+                                lockVault();
+                              }}
+                              className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-amber-500 hover:bg-amber-500/10"
+                            >
+                              <Lock className="h-3.5 w-3.5" />
+                              Lock Vault Now
+                            </button>
+                          </>
+                        )}
                         <a
                           href={`${ACCOUNTS_URL}/account`}
                           target="_blank"
@@ -260,6 +340,22 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
                           <span>SSE Accounts Profile</span>
                           <ExternalLink className="h-3.5 w-3.5" />
                         </a>
+                        <div className="vault-divider my-1 border-t" />
+                        <Link
+                          href="/privacy"
+                          className="vault-text-muted flex items-center gap-2 rounded-xl px-3 py-1.5 text-[11px] font-medium hover:bg-amber-500/10"
+                        >
+                          <Scale className="h-3.5 w-3.5" />
+                          Privacy Policy
+                        </Link>
+                        <Link
+                          href="/terms"
+                          className="vault-text-muted flex items-center gap-2 rounded-xl px-3 py-1.5 text-[11px] font-medium hover:bg-amber-500/10"
+                        >
+                          <FileText className="h-3.5 w-3.5" />
+                          Terms of Service
+                        </Link>
+                        <div className="vault-divider my-1 border-t" />
                         <button
                           type="button"
                           onClick={handleSignOut}
@@ -276,7 +372,7 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
             ) : (
               <Link
                 href="/sign-in"
-                className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 px-3.5 py-2 text-xs font-extrabold text-zinc-950 hover:bg-amber-400"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 px-3 py-2 text-xs font-extrabold text-zinc-950 hover:bg-amber-400"
               >
                 <LogIn className="h-3.5 w-3.5" />
                 Sign In
@@ -286,17 +382,50 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-24 pt-6 sm:px-6 md:pb-12 lg:pt-8">
-        {children}
+      {/* Main Content — Strictly blocked behind 6-Digit PIN Gate on ALL /vault/* routes! */}
+      <main className="mx-auto w-full max-w-6xl flex-1 px-3.5 pb-24 pt-5 sm:px-6 sm:pt-7 md:pb-10">
+        {mustShowPinGate ? <VaultPinGate /> : children}
       </main>
 
-      {/* Native Mobile Bottom Tab Bar (distinct from floating Find|Menu dock!) */}
-      {user && (
-        <nav className="vault-bottom-bar fixed bottom-0 left-0 right-0 z-40 grid grid-cols-4 px-2 py-1.5 md:hidden">
+      {/* Footer */}
+      <footer className="vault-divider hidden border-t py-5 md:block">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-6 text-xs">
+          <span className="vault-text-muted">
+            © {new Date().getFullYear()} SSE Vault · Protected by 6-Digit PIN &amp;
+            AES-256-GCM
+          </span>
+          <div className="flex items-center gap-4">
+            <Link
+              href="/privacy"
+              className="vault-text-muted font-medium hover:text-amber-500"
+            >
+              Privacy Policy
+            </Link>
+            <Link
+              href="/terms"
+              className="vault-text-muted font-medium hover:text-amber-500"
+            >
+              Terms of Service
+            </Link>
+            <a
+              href={ACCOUNTS_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="vault-text-muted inline-flex items-center gap-1 font-medium hover:text-amber-500"
+            >
+              SSE Accounts
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          </div>
+        </div>
+      </footer>
+
+      {/* Mobile Bottom Tab Bar (only shown once unlocked!) */}
+      {isVaultUnlocked && (
+        <nav className="vault-bottom-bar fixed bottom-0 left-0 right-0 z-40 grid grid-cols-5 px-1.5 py-1.5 md:hidden">
           <Link
             href="/vault"
-            className={`flex flex-col items-center justify-center gap-1 rounded-xl py-1.5 text-[10px] font-bold ${
+            className={`flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-bold ${
               isAppsActive ? "text-amber-500" : "vault-text-muted"
             }`}
           >
@@ -306,19 +435,30 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
 
           <Link
             href="/vault/authenticator"
-            className={`flex flex-col items-center justify-center gap-1 rounded-xl py-1.5 text-[10px] font-bold ${
+            className={`flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-bold ${
               pathname.startsWith("/vault/authenticator")
                 ? "text-amber-500"
                 : "vault-text-muted"
             }`}
           >
             <Smartphone className="h-4 w-4" />
-            <span>2FA Codes</span>
+            <span>2FA</span>
           </Link>
+
+          <button
+            type="button"
+            onClick={() => openAddModal(currentLockedDomain)}
+            className="flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-extrabold text-amber-500"
+          >
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-500 text-zinc-950 shadow-md shadow-amber-500/25">
+              <Plus className="h-4 w-4" />
+            </span>
+            <span>Add</span>
+          </button>
 
           <Link
             href="/vault/health"
-            className={`flex flex-col items-center justify-center gap-1 rounded-xl py-1.5 text-[10px] font-bold ${
+            className={`flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-bold ${
               pathname.startsWith("/vault/health")
                 ? "text-amber-500"
                 : "vault-text-muted"
@@ -328,32 +468,44 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
             <span>Health</span>
           </Link>
 
-          <button
-            type="button"
-            onClick={() => openAddModal(currentLockedDomain)}
-            className="flex flex-col items-center justify-center gap-1 rounded-xl py-1.5 text-[10px] font-extrabold text-amber-500"
+          <Link
+            href="/vault/settings"
+            className={`relative flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-bold ${
+              pathname.startsWith("/vault/settings")
+                ? "text-amber-500"
+                : "vault-text-muted"
+            }`}
           >
-            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 text-zinc-950">
-              <Plus className="h-3.5 w-3.5" />
-            </span>
-            <span>Add</span>
-          </button>
+            <Settings className="h-4 w-4" />
+            <span>Settings</span>
+            {hasKeyAlert && (
+              <span className="absolute right-4 top-1 h-2 w-2 rounded-full bg-rose-500" />
+            )}
+          </Link>
         </nav>
       )}
 
-      {/* Global Toast Notification */}
-      {toast && (
-        <div className="animate-vault-modal fixed bottom-20 left-1/2 z-[70] -translate-x-1/2 md:bottom-6">
-          <div className="vault-card flex items-center gap-2 rounded-full border-emerald-500/40 px-4 py-2 text-xs font-bold shadow-2xl">
-            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-            <span className="vault-text-primary">{toast}</span>
-          </div>
+      {/* Toast & Clipboard Auto-Clear */}
+      {(toast || clipboardCountdown > 0) && (
+        <div className="pointer-events-none fixed bottom-20 left-1/2 z-[70] flex w-full max-w-sm -translate-x-1/2 flex-col items-center gap-1.5 px-4 md:bottom-6">
+          {toast && (
+            <div className="animate-vault-modal vault-card pointer-events-auto flex items-center gap-2 rounded-full border-emerald-500/40 px-4 py-2 text-xs font-bold shadow-2xl">
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
+              <span className="vault-text-primary truncate">{toast}</span>
+            </div>
+          )}
+          {clipboardCountdown > 0 && !toast && (
+            <div className="vault-card pointer-events-auto rounded-full px-3.5 py-1 font-mono text-[10px] font-bold text-amber-500 shadow-lg">
+              Clipboard clears in {clipboardCountdown}s
+            </div>
+          )}
         </div>
       )}
 
-      {/* Global Modals */}
-      {modal.open && <VaultItemModal />}
-      <SpotlightModal />
+      {/* Modals (strictly gated on isVaultUnlocked) */}
+      {isVaultUnlocked && modal.open && <VaultItemModal />}
+      {isVaultUnlocked && importExportModal.open && <VaultImportExportModal />}
+      {isVaultUnlocked && <SpotlightModal />}
     </div>
   );
 }

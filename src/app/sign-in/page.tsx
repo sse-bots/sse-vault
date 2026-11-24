@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ExternalLink, KeyRound, Loader2, ShieldCheck } from "lucide-react";
 import { signIn } from "@/lib/auth-client";
@@ -60,8 +61,8 @@ function SignInInner() {
   }
 
   return (
-    <div className="mx-auto mt-10 max-w-md">
-      <div className="vault-card rounded-3xl p-7 shadow-2xl sm:p-8">
+    <div className="mx-auto mt-8 max-w-md sm:mt-12">
+      <div className="vault-card rounded-3xl p-6 shadow-2xl sm:p-8">
         <div className="mb-6 flex flex-col items-center text-center">
           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 text-zinc-950 shadow-lg shadow-amber-500/25">
             <KeyRound className="h-7 w-7" />
@@ -72,8 +73,8 @@ function SignInInner() {
           <p className="vault-text-muted mt-2 text-xs leading-relaxed">
             Sign in with your central{" "}
             <strong className="vault-text-primary">SSE Account</strong> to
-            access your domain-grouped passwords, live TOTP codes, and backup
-            security keys.
+            access your encrypted passwords, OAuth logins, live TOTP codes, and
+            backup security keys.
           </p>
         </div>
 
@@ -108,6 +109,18 @@ function SignInInner() {
             <ExternalLink className="h-3 w-3" />
           </a>
         </div>
+
+        <p className="vault-text-muted mt-6 text-center text-[11px]">
+          By continuing, you agree to our{" "}
+          <Link href="/terms" className="text-amber-500 hover:underline">
+            Terms of Service
+          </Link>{" "}
+          and{" "}
+          <Link href="/privacy" className="text-amber-500 hover:underline">
+            Privacy Policy
+          </Link>
+          .
+        </p>
       </div>
     </div>
   );

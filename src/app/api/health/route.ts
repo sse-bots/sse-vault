@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
 import { getSseIssuerUrl } from "@/lib/sse-sso";
+import { getKeyFingerprint, shouldStoreHexcodeInDb } from "@/lib/crypto";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,6 +23,13 @@ export async function GET() {
       database: dbOk ? "connected" : "error",
       dbError,
       ssoIssuer: getSseIssuerUrl(),
+      encryption: {
+        activeKeyFingerprint: getKeyFingerprint(),
+        storesHexcodeFallbackInDb: shouldStoreHexcodeInDb(),
+        hasLegacyEnvSecrets: Boolean(
+          (process.env.VAULT_LEGACY_ENCRYPTION_SECRETS || "").trim()
+        ),
+      },
       config: {
         hasBetterAuthUrl: Boolean(process.env.BETTER_AUTH_URL),
         hasBetterAuthSecret: Boolean(process.env.BETTER_AUTH_SECRET),
