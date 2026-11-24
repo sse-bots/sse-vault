@@ -1,0 +1,3 @@
+keystore pa=sseworld
+alias = release 
+pass=sseworld
