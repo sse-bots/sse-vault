@@ -29,6 +29,7 @@ const MULTI_PART_TLDS = new Set([
   "com.tw",
   "com.tr",
   "co.kr",
+  "co.id"
 ]);
 
 const DOMAIN_ALIASES: Record<string, string> = {
