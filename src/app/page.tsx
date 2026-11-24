@@ -4,44 +4,55 @@ import Link from "next/link";
 import {
   ArrowRight,
   FileText,
-  KeyRound,
+  FolderLock,
+  Globe,
   Lock,
   ShieldCheck,
   Smartphone,
-  Sparkles,
 } from "lucide-react";
-import { useAuth } from "@/components/AuthContext";
+import { useVault } from "@/components/VaultContext";
+import { SiteIcon } from "@/components/SiteIcon";
+
+const PREVIEW_APPS = [
+  { domain: "google.com", name: "Google", accounts: "3 accounts", totp: "2 live TOTP" },
+  { domain: "github.com", name: "GitHub", accounts: "2 accounts", totp: "10 backup keys" },
+  { domain: "discord.com", name: "Discord", accounts: "2 accounts", totp: "1 live TOTP" },
+  { domain: "vercel.com", name: "Vercel", accounts: "1 account", totp: "8 backup keys" },
+];
 
 export default function HomePage() {
-  const { user, loading } = useAuth();
+  const { user, authLoading } = useVault();
 
   return (
     <div className="space-y-10">
-      <section className="rounded-3xl border border-slate-800 bg-gradient-to-br from-slate-900 via-[#101525] to-indigo-950/60 p-7 sm:p-10">
-        <div className="max-w-2xl space-y-5">
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-indigo-500/35 bg-indigo-500/15 px-3 py-1 text-xs font-bold text-indigo-300">
-            <Sparkles className="h-3.5 w-3.5" />
-            Powered by SSE Accounts SSO · AES-256-GCM
-          </span>
+      {/* Split Hero Bento */}
+      <section className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+        <div className="vault-card flex flex-col justify-between rounded-3xl p-7 sm:p-10 lg:col-span-7">
+          <div className="space-y-5">
+            <span className="inline-flex items-center gap-2 rounded-full border border-amber-500/35 bg-amber-500/10 px-3 py-1 text-[11px] font-bold text-amber-500">
+              <Lock className="h-3.5 w-3.5" />
+              AES-256-GCM · Authenticated by SSE Accounts
+            </span>
 
-          <h1 className="text-3xl font-extrabold tracking-tight text-white sm:text-5xl">
-            Your Private Vault for TOTP &amp; Security Keys
-          </h1>
+            <h1 className="vault-text-primary text-3xl font-black tracking-tight sm:text-5xl">
+              Passwords, TOTP &amp; Security Keys — Organized by App.
+            </h1>
 
-          <p className="text-sm leading-relaxed text-slate-300 sm:text-base">
-            Store website logins (URL, email, username, password), generate live
-            30-second TOTP codes, and import recovery keys straight from{" "}
-            <code>.txt</code> files without ever storing the file — click any
-            code when used to cross it off cleanly as <code>-------</code>.
-          </p>
+            <p className="vault-text-secondary max-w-xl text-sm leading-relaxed sm:text-base">
+              Enter any website URL and SSE Vault automatically fetches its real
+              icon and segregates every account under its own app vault. Upload{" "}
+              <code>.txt</code> recovery files in memory without ever storing
+              them, and tap any used key to cross it off as <code>-------</code>.
+            </p>
+          </div>
 
-          <div className="flex flex-wrap gap-3 pt-2">
-            {loading ? (
-              <div className="h-11 w-44 animate-pulse rounded-xl bg-slate-800/70" />
+          <div className="mt-8 flex flex-wrap items-center gap-3">
+            {authLoading ? (
+              <div className="h-12 w-44 animate-pulse rounded-2xl bg-zinc-500/20" />
             ) : user ? (
               <Link
                 href="/vault"
-                className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-indigo-600/25 transition hover:bg-indigo-500"
+                className="inline-flex items-center gap-2 rounded-2xl bg-amber-500 px-6 py-3 text-sm font-extrabold text-zinc-950 shadow-lg shadow-amber-500/20 transition hover:bg-amber-400"
               >
                 Open My Vault
                 <ArrowRight className="h-4 w-4" />
@@ -49,67 +60,110 @@ export default function HomePage() {
             ) : (
               <Link
                 href="/sign-in"
-                className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-indigo-600/25 transition hover:bg-indigo-500"
+                className="inline-flex items-center gap-2 rounded-2xl bg-amber-500 px-6 py-3 text-sm font-extrabold text-zinc-950 shadow-lg shadow-amber-500/20 transition hover:bg-amber-400"
               >
                 <ShieldCheck className="h-4 w-4" />
-                Sign in with SSE Accounts
+                Unlock with SSE Accounts
               </Link>
             )}
           </div>
         </div>
+
+        {/* Interactive Visual Preview Stack */}
+        <div className="vault-card flex flex-col justify-between gap-4 rounded-3xl p-6 lg:col-span-5">
+          <div className="flex items-center justify-between">
+            <span className="vault-text-muted text-[10px] font-bold uppercase tracking-widest">
+              Auto-Grouped App Vaults
+            </span>
+            <span className="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[10px] font-bold text-emerald-500">
+              Domain Locked
+            </span>
+          </div>
+
+          <div className="space-y-2.5">
+            {PREVIEW_APPS.map((app) => (
+              <div
+                key={app.domain}
+                className="vault-inset flex items-center justify-between gap-3 rounded-2xl px-3.5 py-3"
+              >
+                <div className="flex items-center gap-3">
+                  <SiteIcon
+                    domainOrUrl={app.domain}
+                    label={app.name}
+                    size="sm"
+                  />
+                  <div>
+                    <div className="vault-text-primary text-xs font-bold">
+                      {app.name}
+                    </div>
+                    <div className="vault-text-muted font-mono text-[10px]">
+                      {app.domain}
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="vault-text-secondary text-[11px] font-bold">
+                    {app.accounts}
+                  </div>
+                  <div className="text-[10px] font-semibold text-amber-500">
+                    {app.totp}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="vault-inset flex items-center justify-between rounded-2xl px-3.5 py-2.5 font-mono text-[11px]">
+            <span className="text-amber-500">a8f3k-92p1q</span>
+            <span className="vault-text-muted">→ click →</span>
+            <span className="vault-text-muted font-bold">-----------</span>
+          </div>
+        </div>
       </section>
 
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <div className="rounded-3xl border border-slate-800 bg-slate-900/60 p-6">
-          <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-indigo-500/15 text-indigo-400">
-            <Smartphone className="h-5 w-5" />
-          </div>
-          <h2 className="text-base font-bold text-white">
-            Live TOTP Authenticator
+      {/* Feature Bento Strip */}
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="vault-card rounded-3xl p-5">
+          <Globe className="mb-3 h-5 w-5 text-amber-500" />
+          <h2 className="vault-text-primary text-sm font-extrabold">
+            Auto Website Icons
           </h2>
-          <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
-            Paste any Base32 secret or <code>otpauth://</code> URI to get
-            real-time 6-digit codes with a 30-second countdown ring and
-            one-click copy.
+          <p className="vault-text-muted mt-1 text-xs leading-relaxed">
+            Type any URL and SSE Vault pulls its real icon automatically with
+            instant fallback.
           </p>
         </div>
 
-        <div className="rounded-3xl border border-slate-800 bg-slate-900/60 p-6">
-          <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-400">
-            <FileText className="h-5 w-5" />
-          </div>
-          <h2 className="text-base font-bold text-white">
-            Zero-Storage .txt Parser
+        <div className="vault-card rounded-3xl p-5">
+          <FolderLock className="mb-3 h-5 w-5 text-emerald-500" />
+          <h2 className="vault-text-primary text-sm font-extrabold">
+            Strict App Folders
           </h2>
-          <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
-            Upload your backup codes <code>.txt</code> file — every code is
-            extracted in browser memory, encrypted individually in MongoDB, and
-            the file itself is never saved.
+          <p className="vault-text-muted mt-1 text-xs leading-relaxed">
+            Accounts segregate by root domain (e.g. Google, GitHub). Inside an
+            app page, only that app&apos;s URLs are permitted.
           </p>
         </div>
 
-        <div className="rounded-3xl border border-slate-800 bg-slate-900/60 p-6">
-          <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-500/15 text-amber-400">
-            <KeyRound className="h-5 w-5" />
-          </div>
-          <h2 className="text-base font-bold text-white">
-            Click-to-Consume Keys
+        <div className="vault-card rounded-3xl p-5">
+          <Smartphone className="mb-3 h-5 w-5 text-cyan-500" />
+          <h2 className="vault-text-primary text-sm font-extrabold">
+            Live 2FA Authenticator
           </h2>
-          <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
-            Click any security code when you use it — it copies straight to your
-            clipboard and turns into <code>-------</code> matching the exact
-            length of that code.
+          <p className="vault-text-muted mt-1 text-xs leading-relaxed">
+            Real-time 6-digit TOTP codes with 30-second countdown rings plus a
+            dedicated 2FA wall.
           </p>
         </div>
-      </section>
 
-      <section className="flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
-        <div className="flex items-center gap-3">
-          <Lock className="h-5 w-5 text-emerald-400" />
-          <p className="text-xs text-slate-300">
-            Authenticated strictly through{" "}
-            <strong className="text-white">SSE Accounts</strong> (OAuth 2.1 +
-            PKCE) with per-user AES-256-GCM encryption.
+        <div className="vault-card rounded-3xl p-5">
+          <FileText className="mb-3 h-5 w-5 text-rose-500" />
+          <h2 className="vault-text-primary text-sm font-extrabold">
+            Zero-Storage .txt Keys
+          </h2>
+          <p className="vault-text-muted mt-1 text-xs leading-relaxed">
+            Parse backup codes from <code>.txt</code> in memory without storing
+            the file, and tap to mask used keys as <code>-------</code>.
           </p>
         </div>
       </section>

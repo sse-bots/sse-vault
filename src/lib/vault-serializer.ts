@@ -1,5 +1,6 @@
 import type { Document } from "mongodb";
 import { decryptSecret } from "./crypto";
+import { extractDomainKey, getAppNameForDomain } from "./domain";
 import type {
   StoredSecurityCode,
   VaultItemDTO,
@@ -31,10 +32,23 @@ export function serializeVaultDoc(doc: Document): VaultItemDTO {
     };
   });
 
+  const url = String(doc.url || "");
+  const domainKey =
+    typeof doc.domainKey === "string" && doc.domainKey.trim()
+      ? doc.domainKey.trim().toLowerCase()
+      : extractDomainKey(url) || "other";
+
+  const appName =
+    typeof doc.appName === "string" && doc.appName.trim()
+      ? doc.appName.trim()
+      : getAppNameForDomain(domainKey);
+
   return {
     id: String(doc._id),
-    label: String(doc.label || "Untitled"),
-    url: String(doc.url || ""),
+    domainKey,
+    appName,
+    label: String(doc.label || appName),
+    url,
     email: typeof doc.email === "string" && doc.email ? doc.email : null,
     username:
       typeof doc.username === "string" && doc.username ? doc.username : null,

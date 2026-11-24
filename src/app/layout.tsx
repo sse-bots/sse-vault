@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { AuthProvider } from "@/components/AuthContext";
-import { AppShell } from "@/components/AppShell";
+import { VaultProvider } from "@/components/VaultContext";
+import { VaultShell } from "@/components/VaultShell";
 
 export const metadata: Metadata = {
-  title: "SSE Vault — Encrypted TOTP & Security Key Manager",
+  title: "SSE Vault — Password, TOTP & Security Key Manager",
   description:
-    "Store encrypted website logins, live TOTP authenticators, and single-use backup security keys protected by SSE Accounts SSO.",
+    "Domain-grouped encrypted vault for website logins, live TOTP authenticators, and single-use backup security keys powered by SSE Accounts.",
 };
 
 export default function RootLayout({
@@ -15,11 +15,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark" data-primary="green" data-neutral="slate">
-      <body className="min-h-screen bg-[#07090e] text-slate-100 antialiased">
-        <AuthProvider>
-          <AppShell>{children}</AppShell>
-        </AuthProvider>
+    <html lang="en" className="dark">
+      <body className="min-h-screen antialiased">
+        <VaultProvider>
+          <VaultShell>{children}</VaultShell>
+        </VaultProvider>
       </body>
     </html>
   );
