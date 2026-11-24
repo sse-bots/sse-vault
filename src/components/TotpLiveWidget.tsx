@@ -1,17 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, Copy, Eye, EyeOff, Smartphone } from "lucide-react";
+import { Check, Copy, Eye, EyeOff, KeyRound } from "lucide-react";
 import { generateTotpCode } from "@/lib/totp";
 
 export function TotpLiveWidget({
   secret,
   privacyBlur = false,
   compact = false,
+  onCopied,
 }: {
   secret: string;
   privacyBlur?: boolean;
   compact?: boolean;
+  onCopied?: (code: string) => void;
 }) {
   const [code, setCode] = useState<string>("------");
   const [remaining, setRemaining] = useState<number>(30);
@@ -22,7 +24,6 @@ export function TotpLiveWidget({
 
   useEffect(() => {
     let active = true;
-
     async function tick() {
       const res = await generateTotpCode(secret);
       if (!active) return;
@@ -36,7 +37,6 @@ export function TotpLiveWidget({
       setRemaining(res.remaining);
       setPeriod(res.period);
     }
-
     tick();
     const timer = window.setInterval(tick, 500);
     return () => {
@@ -45,14 +45,15 @@ export function TotpLiveWidget({
     };
   }, [secret]);
 
-  async function copyCode() {
+  async function handleCopy() {
     if (invalid || code.includes("-")) return;
     try {
       await navigator.clipboard.writeText(code);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
+      onCopied?.(code);
+      window.setTimeout(() => setCopied(false), 1600);
     } catch {
-      // ignore clipboard errors
+      // ignore
     }
   }
 
@@ -67,21 +68,20 @@ export function TotpLiveWidget({
   const circumference = 2 * Math.PI * radius;
   const dashOffset = circumference * (1 - remaining / Math.max(1, period));
   const ringColor =
-    remaining <= 4 ? "#f43f5e" : remaining <= 8 ? "#f59e0b" : "var(--accent-500)";
+    remaining <= 5 ? "#ef4444" : remaining <= 10 ? "#f59e0b" : "#06b6d4";
 
   return (
-    <div className="rounded-2xl border border-indigo-500/35 bg-slate-950/80 p-3.5">
-      <div className="flex items-center justify-between gap-2">
-        <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-indigo-400">
-          <Smartphone className="h-3.5 w-3.5" />
-          Live TOTP Code
+    <div className="vault-inset rounded-2xl p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-cyan-500">
+          <KeyRound className="h-3 w-3" />
+          Live TOTP
         </span>
-
         {!compact && (
           <button
             type="button"
             onClick={() => setShowRawSecret((v) => !v)}
-            className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-400 hover:text-white"
+            className="vault-text-muted inline-flex items-center gap-1 text-[10px] font-semibold hover:text-amber-500"
           >
             {showRawSecret ? (
               <>
@@ -91,7 +91,7 @@ export function TotpLiveWidget({
             ) : (
               <>
                 <Eye className="h-3 w-3" />
-                Show Secret
+                Raw Secret
               </>
             )}
           </button>
@@ -100,13 +100,13 @@ export function TotpLiveWidget({
 
       <button
         type="button"
-        onClick={copyCode}
         disabled={invalid}
-        title="Click to copy TOTP code"
-        className="mt-2 flex w-full items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900/80 px-3.5 py-2.5 text-left transition hover:border-indigo-500 disabled:opacity-60"
+        onClick={handleCopy}
+        title="Tap to copy live TOTP code"
+        className="vault-card flex w-full items-center justify-between gap-3 rounded-xl px-3.5 py-2.5 text-left transition hover:border-cyan-500/50 disabled:opacity-60"
       >
         <span
-          className={`font-mono text-2xl font-extrabold tracking-widest text-white transition ${
+          className={`vault-text-primary font-mono text-2xl font-black tracking-[0.18em] transition ${
             privacyBlur ? "blur-sm select-none" : ""
           }`}
         >
@@ -115,12 +115,12 @@ export function TotpLiveWidget({
 
         <div className="flex items-center gap-2.5">
           {copied ? (
-            <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/15 px-2 py-1 text-[11px] font-bold text-emerald-300">
+            <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/15 px-2 py-1 text-[11px] font-bold text-emerald-500">
               <Check className="h-3.5 w-3.5" />
               Copied
             </span>
           ) : (
-            <Copy className="h-4 w-4 text-slate-400" />
+            <Copy className="vault-text-muted h-4 w-4" />
           )}
 
           {!invalid && (
@@ -132,7 +132,7 @@ export function TotpLiveWidget({
                   r={radius}
                   fill="none"
                   stroke="currentColor"
-                  strokeOpacity="0.16"
+                  strokeOpacity="0.14"
                   strokeWidth="3"
                 />
                 <circle
@@ -148,7 +148,7 @@ export function TotpLiveWidget({
                   className="transition-all duration-500"
                 />
               </svg>
-              <span className="absolute font-mono text-[10px] font-bold text-slate-300">
+              <span className="vault-text-secondary absolute font-mono text-[10px] font-extrabold">
                 {remaining}
               </span>
             </div>
@@ -157,14 +157,14 @@ export function TotpLiveWidget({
       </button>
 
       {showRawSecret && !compact && (
-        <div className="mt-2 flex items-center justify-between gap-2 rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2">
-          <code className="truncate font-mono text-[11px] text-slate-300">
+        <div className="vault-card mt-2 flex items-center justify-between gap-2 rounded-xl px-3 py-2">
+          <code className="vault-text-secondary truncate font-mono text-[11px]">
             {secret}
           </code>
           <button
             type="button"
             onClick={() => navigator.clipboard.writeText(secret).catch(() => {})}
-            className="shrink-0 text-[11px] font-semibold text-indigo-400 hover:underline"
+            className="shrink-0 text-[11px] font-bold text-amber-500 hover:underline"
           >
             Copy
           </button>

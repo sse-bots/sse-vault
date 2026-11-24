@@ -11,6 +11,11 @@ export interface VaultSecurityCodeDTO {
 
 export interface VaultItemDTO {
   id: string;
+  /** Canonical root domain used for automatic app grouping (e.g. "github.com", "google.com") */
+  domainKey: string;
+  /** Friendly App Name (e.g. "GitHub", "Google") */
+  appName: string;
+  /** Optional account nickname / label */
   label: string;
   url: string;
   email: string | null;
@@ -30,4 +35,16 @@ export interface StoredSecurityCode {
   length: number;
   used: boolean;
   usedAt: Date | null;
+}
+
+export interface VaultAppGroupSummary {
+  domainKey: string;
+  appName: string;
+  accountCount: number;
+  totpCount: number;
+  unusedCodesCount: number;
+  totalCodesCount: number;
+  hasFavorite: boolean;
+  previewIdentities: string[];
+  latestUpdatedAt: string;
 }

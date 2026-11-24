@@ -18,49 +18,42 @@ import {
   Upload,
   User,
 } from "lucide-react";
+import { useVault } from "@/components/VaultContext";
 import { TotpLiveWidget } from "@/components/TotpLiveWidget";
+import { evaluatePasswordStrength } from "@/lib/domain";
 import { extractSecurityCodesFromText } from "@/lib/parse-codes";
 import type { VaultItemDTO, VaultSecurityCodeDTO } from "@/lib/vault-types";
 
-interface VaultEntryCardProps {
-  item: VaultItemDTO;
-  privacyBlur: boolean;
-  onEdit: (item: VaultItemDTO) => void;
-  onUpdated: (item: VaultItemDTO) => void;
-  onDeleted: (id: string) => void;
-}
-
 export function VaultEntryCard({
   item,
-  privacyBlur,
-  onEdit,
-  onUpdated,
-  onDeleted,
-}: VaultEntryCardProps) {
+  lockedDomain,
+}: {
+  item: VaultItemDTO;
+  lockedDomain?: string;
+}) {
+  const { privacyBlur, openEditModal, upsertItem, removeItem, showToast } =
+    useVault();
   const quickTxtRef = useRef<HTMLInputElement | null>(null);
+
   const [showPassword, setShowPassword] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [busyCodeId, setBusyCodeId] = useState<string | null>(null);
   const [uploadingTxt, setUploadingTxt] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [cardNotice, setCardNotice] = useState<string | null>(null);
 
   const unusedCount = item.securityCodes.filter((c) => !c.used).length;
   const totalCodes = item.securityCodes.length;
+  const pwdStrength = item.password
+    ? evaluatePasswordStrength(item.password)
+    : null;
 
-  function flashNotice(msg: string) {
-    setCardNotice(msg);
-    window.setTimeout(() => {
-      setCardNotice((prev) => (prev === msg ? null : prev));
-    }, 2600);
-  }
-
-  async function copyText(key: string, val: string) {
+  async function copyField(field: string, value: string, label: string) {
     try {
-      await navigator.clipboard.writeText(val);
-      setCopiedField(key);
+      await navigator.clipboard.writeText(value);
+      setCopiedField(field);
+      showToast(`${label} copied to clipboard.`);
       window.setTimeout(() => {
-        setCopiedField((prev) => (prev === key ? null : prev));
+        setCopiedField((prev) => (prev === field ? null : prev));
       }, 1500);
     } catch {
       // ignore
@@ -76,14 +69,15 @@ export function VaultEntryCard({
     });
     if (res.ok) {
       const j = await res.json();
-      if (j.item) onUpdated(j.item);
+      if (j.item) upsertItem(j.item);
     }
   }
 
   async function handleDelete() {
+    const identity = item.email || item.username || item.label;
     if (
       !confirm(
-        `Permanently delete "${item.label}" and all its encrypted TOTP & recovery keys?`
+        `Permanently delete "${identity}" from ${item.appName} along with all TOTP & recovery keys?`
       )
     ) {
       return;
@@ -94,24 +88,20 @@ export function VaultEntryCard({
         method: "DELETE",
         credentials: "include",
       });
-      if (res.ok) onDeleted(item.id);
+      if (res.ok) {
+        removeItem(item.id);
+        showToast("Entry deleted from vault.");
+      }
     } finally {
       setDeleting(false);
     }
   }
 
-  /**
-   * Clicking an unused security code:
-   *  1. Copies the plaintext code to clipboard immediately so you can paste it.
-   *  2. Persists `used: true` to MongoDB so it turns into `-------` (exact length!).
-   */
   async function handleUseCode(codeObj: VaultSecurityCodeDTO) {
     if (codeObj.used || busyCodeId) return;
-
     if (codeObj.code) {
       await navigator.clipboard.writeText(codeObj.code).catch(() => {});
     }
-
     setBusyCodeId(codeObj.id);
     try {
       const res = await fetch(`/api/vault/${item.id}/codes`, {
@@ -126,8 +116,8 @@ export function VaultEntryCard({
       });
       if (res.ok) {
         const j = await res.json();
-        if (j.item) onUpdated(j.item);
-        flashNotice("Code copied & marked as used!");
+        if (j.item) upsertItem(j.item);
+        showToast("Security code copied & masked as used!");
       }
     } finally {
       setBusyCodeId(null);
@@ -150,8 +140,8 @@ export function VaultEntryCard({
       });
       if (res.ok) {
         const j = await res.json();
-        if (j.item) onUpdated(j.item);
-        flashNotice("Code restored.");
+        if (j.item) upsertItem(j.item);
+        showToast("Security code restored.");
       }
     } finally {
       setBusyCodeId(null);
@@ -164,7 +154,7 @@ export function VaultEntryCard({
       const text = await file.text();
       const codes = extractSecurityCodesFromText(text);
       if (codes.length === 0) {
-        flashNotice("No security codes found in that .txt file.");
+        showToast("No security codes detected in that .txt file.");
         return;
       }
       const res = await fetch(`/api/vault/${item.id}/codes`, {
@@ -175,8 +165,8 @@ export function VaultEntryCard({
       });
       if (res.ok) {
         const j = await res.json();
-        if (j.item) onUpdated(j.item);
-        flashNotice(`Added ${codes.length} code(s) from .txt (file not stored).`);
+        if (j.item) upsertItem(j.item);
+        showToast(`Imported ${codes.length} code(s) — .txt file discarded.`);
       }
     } finally {
       setUploadingTxt(false);
@@ -184,48 +174,37 @@ export function VaultEntryCard({
     }
   }
 
-  const displayHost = (() => {
-    try {
-      return new URL(item.url).hostname.replace(/^www\./i, "");
-    } catch {
-      return item.url;
-    }
-  })();
+  const primaryTitle = item.label !== item.appName
+    ? item.label
+    : item.email || item.username || item.appName;
 
   return (
-    <article className="flex flex-col justify-between gap-4 rounded-3xl border border-slate-800 bg-slate-900/70 p-5 transition hover:border-indigo-500/45">
+    <article className="vault-card flex flex-col justify-between gap-4 rounded-3xl p-5">
       <div className="space-y-4">
-        {/* Card Header */}
+        {/* Account Card Header */}
         <div className="flex items-start justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-sm font-extrabold uppercase text-white shadow-md shadow-indigo-500/20">
-              {item.label.slice(0, 2)}
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5">
-                <h3 className="truncate text-base font-bold text-white">
-                  {item.label}
-                </h3>
-              </div>
-              <a
-                href={item.url}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex max-w-full items-center gap-1 truncate text-xs text-indigo-400 hover:underline"
-              >
-                <span className="truncate">{displayHost}</span>
-                <ExternalLink className="h-3 w-3 shrink-0" />
-              </a>
-            </div>
+          <div className="min-w-0">
+            <h3 className="vault-text-primary truncate text-base font-extrabold">
+              {primaryTitle}
+            </h3>
+            <a
+              href={item.url}
+              target="_blank"
+              rel="noreferrer"
+              className="vault-text-muted mt-0.5 inline-flex max-w-full items-center gap-1 truncate font-mono text-[11px] hover:text-amber-500 hover:underline"
+            >
+              <span className="truncate">{item.url}</span>
+              <ExternalLink className="h-3 w-3 shrink-0" />
+            </a>
           </div>
 
           <div className="flex shrink-0 items-center gap-1">
             <button
               type="button"
               onClick={toggleFavorite}
-              title={item.favorite ? "Unpin favorite" : "Pin favorite"}
-              className={`rounded-xl p-2 transition hover:bg-slate-800 ${
-                item.favorite ? "text-amber-400" : "text-slate-500 hover:text-white"
+              title={item.favorite ? "Remove favorite" : "Favorite"}
+              className={`rounded-xl p-2 transition hover:bg-amber-500/10 ${
+                item.favorite ? "text-amber-500" : "vault-text-muted"
               }`}
             >
               <Star
@@ -235,9 +214,9 @@ export function VaultEntryCard({
             </button>
             <button
               type="button"
-              onClick={() => onEdit(item)}
-              title="Edit entry"
-              className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-800 hover:text-white"
+              onClick={() => openEditModal(item, lockedDomain || item.domainKey)}
+              title="Edit account"
+              className="vault-text-muted rounded-xl p-2 transition hover:bg-amber-500/10 hover:text-amber-500"
             >
               <Edit3 className="h-4 w-4" />
             </button>
@@ -245,8 +224,8 @@ export function VaultEntryCard({
               type="button"
               disabled={deleting}
               onClick={handleDelete}
-              title="Delete entry"
-              className="rounded-xl p-2 text-slate-400 transition hover:bg-rose-500/15 hover:text-rose-400 disabled:opacity-50"
+              title="Delete account"
+              className="vault-text-muted rounded-xl p-2 transition hover:bg-rose-500/10 hover:text-rose-500 disabled:opacity-50"
             >
               {deleting ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -257,29 +236,33 @@ export function VaultEntryCard({
           </div>
         </div>
 
-        {/* Credentials (Email, Username, Password) */}
+        {/* Credentials Table */}
         {(item.email || item.username || item.password) && (
-          <div className="space-y-2 rounded-2xl border border-slate-800 bg-slate-950/60 p-3">
+          <div className="vault-inset divide-y rounded-2xl">
             {item.email && (
-              <div className="flex items-center justify-between gap-2 text-xs">
-                <div className="flex min-w-0 items-center gap-2">
-                  <Mail className="h-3.5 w-3.5 shrink-0 text-slate-500" />
-                  <span
-                    className={`truncate font-mono text-slate-200 ${
-                      privacyBlur ? "blur-sm select-none" : ""
-                    }`}
-                  >
-                    {item.email}
-                  </span>
+              <div className="vault-divider flex items-center justify-between gap-2 px-3.5 py-2.5 text-xs">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <Mail className="vault-text-muted h-3.5 w-3.5 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="vault-text-muted text-[9px] font-bold uppercase tracking-wider">
+                      Email
+                    </div>
+                    <div
+                      className={`vault-text-primary truncate font-mono text-xs ${
+                        privacyBlur ? "blur-sm select-none" : ""
+                      }`}
+                    >
+                      {item.email}
+                    </div>
+                  </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => copyText("email", item.email!)}
-                  className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white"
-                  title="Copy email"
+                  onClick={() => copyField("email", item.email!, "Email")}
+                  className="vault-text-muted shrink-0 rounded-lg p-1.5 hover:text-amber-500"
                 >
                   {copiedField === "email" ? (
-                    <Check className="h-3.5 w-3.5 text-emerald-400" />
+                    <Check className="h-3.5 w-3.5 text-emerald-500" />
                   ) : (
                     <Copy className="h-3.5 w-3.5" />
                   )}
@@ -288,25 +271,31 @@ export function VaultEntryCard({
             )}
 
             {item.username && (
-              <div className="flex items-center justify-between gap-2 text-xs">
-                <div className="flex min-w-0 items-center gap-2">
-                  <User className="h-3.5 w-3.5 shrink-0 text-slate-500" />
-                  <span
-                    className={`truncate font-mono text-slate-200 ${
-                      privacyBlur ? "blur-sm select-none" : ""
-                    }`}
-                  >
-                    {item.username}
-                  </span>
+              <div className="vault-divider flex items-center justify-between gap-2 px-3.5 py-2.5 text-xs">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <User className="vault-text-muted h-3.5 w-3.5 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="vault-text-muted text-[9px] font-bold uppercase tracking-wider">
+                      Username
+                    </div>
+                    <div
+                      className={`vault-text-primary truncate font-mono text-xs ${
+                        privacyBlur ? "blur-sm select-none" : ""
+                      }`}
+                    >
+                      {item.username}
+                    </div>
+                  </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => copyText("username", item.username!)}
-                  className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white"
-                  title="Copy username"
+                  onClick={() =>
+                    copyField("username", item.username!, "Username")
+                  }
+                  className="vault-text-muted shrink-0 rounded-lg p-1.5 hover:text-amber-500"
                 >
                   {copiedField === "username" ? (
-                    <Check className="h-3.5 w-3.5 text-emerald-400" />
+                    <Check className="h-3.5 w-3.5 text-emerald-500" />
                   ) : (
                     <Copy className="h-3.5 w-3.5" />
                   )}
@@ -315,23 +304,40 @@ export function VaultEntryCard({
             )}
 
             {item.password && (
-              <div className="flex items-center justify-between gap-2 text-xs">
-                <div className="flex min-w-0 items-center gap-2">
-                  <Lock className="h-3.5 w-3.5 shrink-0 text-slate-500" />
-                  <span
-                    className={`truncate font-mono text-slate-200 ${
-                      privacyBlur ? "blur-sm select-none" : ""
-                    }`}
-                  >
-                    {showPassword ? item.password : "••••••••••••"}
-                  </span>
+              <div className="vault-divider flex items-center justify-between gap-2 px-3.5 py-2.5 text-xs">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <Lock className="vault-text-muted h-3.5 w-3.5 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="vault-text-muted text-[9px] font-bold uppercase tracking-wider">
+                        Password
+                      </span>
+                      {pwdStrength && (
+                        <span
+                          className="rounded px-1 py-0.2 text-[9px] font-bold uppercase"
+                          style={{
+                            backgroundColor: `${pwdStrength.color}20`,
+                            color: pwdStrength.color,
+                          }}
+                        >
+                          {pwdStrength.label}
+                        </span>
+                      )}
+                    </div>
+                    <div
+                      className={`vault-text-primary truncate font-mono text-xs ${
+                        privacyBlur ? "blur-sm select-none" : ""
+                      }`}
+                    >
+                      {showPassword ? item.password : "••••••••••••"}
+                    </div>
+                  </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-0.5">
                   <button
                     type="button"
                     onClick={() => setShowPassword((v) => !v)}
-                    className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white"
-                    title={showPassword ? "Hide password" : "Reveal password"}
+                    className="vault-text-muted rounded-lg p-1.5 hover:text-amber-500"
                   >
                     {showPassword ? (
                       <EyeOff className="h-3.5 w-3.5" />
@@ -341,12 +347,13 @@ export function VaultEntryCard({
                   </button>
                   <button
                     type="button"
-                    onClick={() => copyText("password", item.password!)}
-                    className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white"
-                    title="Copy password"
+                    onClick={() =>
+                      copyField("password", item.password!, "Password")
+                    }
+                    className="vault-text-muted rounded-lg p-1.5 hover:text-amber-500"
                   >
                     {copiedField === "password" ? (
-                      <Check className="h-3.5 w-3.5 text-emerald-400" />
+                      <Check className="h-3.5 w-3.5 text-emerald-500" />
                     ) : (
                       <Copy className="h-3.5 w-3.5" />
                     )}
@@ -357,27 +364,31 @@ export function VaultEntryCard({
           </div>
         )}
 
-        {/* Live TOTP Authenticator */}
+        {/* Live TOTP Widget */}
         {item.totpSecret && (
-          <TotpLiveWidget secret={item.totpSecret} privacyBlur={privacyBlur} />
+          <TotpLiveWidget
+            secret={item.totpSecret}
+            privacyBlur={privacyBlur}
+            onCopied={() => showToast("TOTP code copied to clipboard.")}
+          />
         )}
 
-        {/* Security / Backup Codes Section */}
-        <div className="space-y-2.5 rounded-2xl border border-slate-800 bg-slate-950/60 p-3.5">
+        {/* Click-to-Consume Backup Security Keys */}
+        <div className="vault-inset space-y-2.5 rounded-2xl p-3.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <KeyRound className="h-3.5 w-3.5 text-amber-400" />
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
+              <KeyRound className="h-3.5 w-3.5 text-amber-500" />
+              <span className="vault-text-secondary text-[10px] font-bold uppercase tracking-widest">
                 Security Keys
               </span>
               {totalCodes > 0 && (
                 <span
                   className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
                     unusedCount === 0
-                      ? "bg-rose-500/15 text-rose-300"
+                      ? "bg-rose-500/15 text-rose-500"
                       : unusedCount <= 2
-                        ? "bg-amber-500/15 text-amber-300"
-                        : "bg-emerald-500/15 text-emerald-300"
+                        ? "bg-amber-500/15 text-amber-500"
+                        : "bg-emerald-500/15 text-emerald-500"
                   }`}
                 >
                   {unusedCount}/{totalCodes} left
@@ -389,7 +400,7 @@ export function VaultEntryCard({
               type="button"
               disabled={uploadingTxt}
               onClick={() => quickTxtRef.current?.click()}
-              className="inline-flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-900 px-2.5 py-1 text-[10px] font-semibold text-slate-300 hover:border-indigo-500 hover:text-white disabled:opacity-50"
+              className="vault-card vault-text-secondary inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[10px] font-bold hover:border-amber-500 hover:text-amber-500 disabled:opacity-50"
             >
               {uploadingTxt ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -410,22 +421,16 @@ export function VaultEntryCard({
             />
           </div>
 
-          {cardNotice && (
-            <div className="rounded-lg bg-emerald-500/15 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-300">
-              {cardNotice}
-            </div>
-          )}
-
           {totalCodes === 0 ? (
-            <p className="text-[11px] text-slate-500">
-              No backup security keys yet. Upload a <code>.txt</code> file to
-              parse &amp; store codes automatically.
+            <p className="vault-text-muted text-[11px]">
+              No backup security keys yet. Tap <strong>Import .txt</strong> to
+              extract codes without storing the file.
             </p>
           ) : (
             <>
-              <p className="text-[10px] text-slate-500">
-                Click any code to copy &amp; mark it used (turns into{" "}
-                <code>-------</code> matching its exact length).
+              <p className="vault-text-muted text-[10px]">
+                Click any unused key to copy &amp; turn it into{" "}
+                <code>-------</code> (exact code length).
               </p>
 
               <div className="grid grid-cols-2 gap-1.5">
@@ -435,22 +440,22 @@ export function VaultEntryCard({
                     return (
                       <div
                         key={c.id}
-                        className="flex items-center justify-between gap-1.5 rounded-xl border border-slate-800/80 bg-slate-900/40 px-2.5 py-2"
                         title={
                           c.usedAt
                             ? `Used on ${new Date(c.usedAt).toLocaleString()}`
-                            : "Used security code"
+                            : "Used code"
                         }
+                        className="vault-card flex items-center justify-between gap-1.5 rounded-xl px-2.5 py-2 opacity-65"
                       >
-                        <span className="truncate font-mono text-xs font-bold tracking-wider text-slate-500 select-none">
+                        <span className="vault-text-muted truncate font-mono text-xs font-extrabold tracking-wider select-none">
                           {c.masked}
                         </span>
                         <button
                           type="button"
                           disabled={isBusy}
                           onClick={() => handleRestoreCode(c)}
-                          title="Undo / restore code"
-                          className="shrink-0 rounded-md p-1 text-slate-500 hover:bg-slate-800 hover:text-indigo-400"
+                          title="Undo / Restore code"
+                          className="vault-text-muted shrink-0 rounded-md p-1 hover:text-amber-500"
                         >
                           {isBusy ? (
                             <Loader2 className="h-3 w-3 animate-spin" />
@@ -468,20 +473,20 @@ export function VaultEntryCard({
                       type="button"
                       disabled={isBusy}
                       onClick={() => handleUseCode(c)}
-                      title="Click to copy & mark as used (-------)"
-                      className="group flex items-center justify-between gap-1.5 rounded-xl border border-slate-800 bg-slate-900/80 px-2.5 py-2 text-left transition hover:border-indigo-500 hover:bg-indigo-500/10 disabled:opacity-50"
+                      title="Click to copy & mask as used (-------)"
+                      className="vault-card group flex items-center justify-between gap-1.5 rounded-xl px-2.5 py-2 text-left transition hover:border-amber-500 hover:bg-amber-500/10 disabled:opacity-50"
                     >
                       <span
-                        className={`truncate font-mono text-xs font-semibold text-indigo-300 group-hover:text-white ${
+                        className={`truncate font-mono text-xs font-bold text-amber-500 ${
                           privacyBlur ? "blur-sm select-none" : ""
                         }`}
                       >
                         {c.code || c.masked}
                       </span>
                       {isBusy ? (
-                        <Loader2 className="h-3 w-3 shrink-0 animate-spin text-indigo-400" />
+                        <Loader2 className="h-3 w-3 shrink-0 animate-spin text-amber-500" />
                       ) : (
-                        <Copy className="h-3 w-3 shrink-0 text-slate-500 opacity-60 transition group-hover:text-indigo-400 group-hover:opacity-100" />
+                        <Copy className="vault-text-muted h-3 w-3 shrink-0 opacity-60 transition group-hover:text-amber-500 group-hover:opacity-100" />
                       )}
                     </button>
                   );
@@ -493,7 +498,7 @@ export function VaultEntryCard({
 
         {item.notes && (
           <p
-            className={`rounded-xl border border-slate-800/80 bg-slate-950/40 px-3 py-2 text-[11px] text-slate-400 ${
+            className={`vault-inset vault-text-muted rounded-xl px-3 py-2 text-[11px] ${
               privacyBlur ? "blur-sm select-none" : ""
             }`}
           >

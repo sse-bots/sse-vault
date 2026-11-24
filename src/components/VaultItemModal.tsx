@@ -1,13 +1,15 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
+  AlertTriangle,
   CheckCircle2,
   Eye,
   EyeOff,
   FileText,
+  FolderPlus,
+  Folders,
   Globe,
-  KeyRound,
   Loader2,
   Lock,
   Mail,
@@ -18,15 +20,17 @@ import {
   User,
   X,
 } from "lucide-react";
-import { extractSecurityCodesFromText } from "@/lib/parse-codes";
+import { useVault } from "@/components/VaultContext";
+import { SiteIcon } from "@/components/SiteIcon";
 import { TotpLiveWidget } from "@/components/TotpLiveWidget";
+import {
+  evaluatePasswordStrength,
+  extractDomainKey,
+  getAppNameForDomain,
+  isUrlAllowedForDomain,
+} from "@/lib/domain";
+import { extractSecurityCodesFromText } from "@/lib/parse-codes";
 import type { VaultItemDTO } from "@/lib/vault-types";
-
-interface VaultItemModalProps {
-  initialItem?: VaultItemDTO | null;
-  onClose: () => void;
-  onSaved: (item: VaultItemDTO) => void;
-}
 
 function generateStrongPassword(len = 20): string {
   const chars =
@@ -36,15 +40,17 @@ function generateStrongPassword(len = 20): string {
   return Array.from(arr, (n) => chars[n % chars.length]).join("");
 }
 
-export function VaultItemModal({
-  initialItem,
-  onClose,
-  onSaved,
-}: VaultItemModalProps) {
+export function VaultItemModal() {
+  const { modal, closeModal, appGroups, upsertItem, showToast } = useVault();
+  const initialItem = modal.editingItem;
+  const lockedDomain = modal.lockedDomain;
   const isEdit = Boolean(initialItem);
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [url, setUrl] = useState(initialItem?.url || "");
+  const [url, setUrl] = useState(
+    initialItem?.url || (lockedDomain ? `https://${lockedDomain}` : "")
+  );
   const [label, setLabel] = useState(initialItem?.label || "");
   const [email, setEmail] = useState(initialItem?.email || "");
   const [username, setUsername] = useState(initialItem?.username || "");
@@ -54,7 +60,6 @@ export function VaultItemModal({
   const [notes, setNotes] = useState(initialItem?.notes || "");
   const [favorite, setFavorite] = useState(Boolean(initialItem?.favorite));
 
-  // Security codes parsed from .txt or entered manually (never storing the file!)
   const [codesMode, setCodesMode] = useState<"keep" | "append" | "replace">(
     isEdit ? "keep" : "replace"
   );
@@ -66,6 +71,24 @@ export function VaultItemModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const detectedDomain = useMemo(() => extractDomainKey(url), [url]);
+  const detectedAppName = useMemo(
+    () => (detectedDomain ? getAppNameForDomain(detectedDomain) : ""),
+    [detectedDomain]
+  );
+
+  const matchedExistingGroup = useMemo(
+    () => appGroups.find((g) => g.domainKey === detectedDomain) || null,
+    [appGroups, detectedDomain]
+  );
+
+  const domainMismatch = Boolean(
+    lockedDomain && url.trim() && !isUrlAllowedForDomain(url, lockedDomain)
+  );
+
+  const lockedAppName = lockedDomain ? getAppNameForDomain(lockedDomain) : "";
+  const strength = useMemo(() => evaluatePasswordStrength(password), [password]);
+
   async function processTxtFile(file: File) {
     setError(null);
     if (file.size > 512 * 1024) {
@@ -73,7 +96,6 @@ export function VaultItemModal({
       return;
     }
     try {
-      // Read purely in browser RAM — file is NEVER sent to the server or stored
       const text = await file.text();
       const extracted = extractSecurityCodesFromText(text);
       if (extracted.length === 0) {
@@ -82,20 +104,15 @@ export function VaultItemModal({
         );
         return;
       }
-
       setParsedCodes((prev) => Array.from(new Set([...prev, ...extracted])));
-      if (isEdit && codesMode === "keep") {
-        setCodesMode("append");
-      }
+      if (isEdit && codesMode === "keep") setCodesMode("append");
       setFileFeedback(
         `Extracted ${extracted.length} security code(s) from "${file.name}" in memory — file discarded and never stored.`
       );
     } catch {
       setError("Could not read that .txt file.");
     } finally {
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
 
@@ -103,18 +120,19 @@ export function VaultItemModal({
     const extracted = extractSecurityCodesFromText(manualCodeInput);
     if (extracted.length === 0) return;
     setParsedCodes((prev) => Array.from(new Set([...prev, ...extracted])));
-    if (isEdit && codesMode === "keep") {
-      setCodesMode("append");
-    }
+    if (isEdit && codesMode === "keep") setCodesMode("append");
     setManualCodeInput("");
-  }
-
-  function removeParsedCode(code: string) {
-    setParsedCodes((prev) => prev.filter((c) => c !== code));
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (domainMismatch) {
+      setError(
+        `Only ${lockedDomain} URLs are allowed inside ${lockedAppName}.`
+      );
+      return;
+    }
+
     setSaving(true);
     setError(null);
     try {
@@ -125,6 +143,7 @@ export function VaultItemModal({
         ? {
             label,
             url,
+            expectedDomain: lockedDomain || undefined,
             email,
             username,
             password,
@@ -137,6 +156,7 @@ export function VaultItemModal({
         : {
             label,
             url,
+            expectedDomain: lockedDomain || undefined,
             email,
             username,
             password,
@@ -158,8 +178,19 @@ export function VaultItemModal({
         setSaving(false);
         return;
       }
-      if (j.item) onSaved(j.item);
-      onClose();
+
+      if (j.item) {
+        const savedItem = j.item as VaultItemDTO;
+        upsertItem(savedItem);
+        if (isEdit) {
+          showToast(`Updated ${savedItem.appName} entry.`);
+        } else if (j.addedToExistingGroup) {
+          showToast(`Added into existing ${savedItem.appName} vault.`);
+        } else {
+          showToast(`Created new ${savedItem.appName} app group!`);
+        }
+      }
+      closeModal();
     } catch {
       setError("Network error while saving vault entry.");
       setSaving(false);
@@ -167,112 +198,179 @@ export function VaultItemModal({
   }
 
   return (
-    <div className="animate-backdrop-in fixed inset-0 z-50 flex items-end justify-center bg-black/75 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+    <div className="animate-vault-fade fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4">
       <form
         onSubmit={handleSubmit}
-        className="animate-sheet-up max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-t-3xl border border-slate-700 bg-[#0b1120] p-5 shadow-2xl sm:rounded-3xl sm:p-6"
+        className="animate-vault-modal vault-card max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-t-3xl p-5 shadow-2xl sm:rounded-3xl sm:p-6"
       >
-        <div className="mb-5 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600/20 text-indigo-400">
-              <KeyRound className="h-5 w-5" />
-            </div>
-            <div>
-              <h2 className="text-lg font-bold text-white">
-                {isEdit ? `Edit ${initialItem?.label}` : "Add Vault Entry"}
+        {/* Header with Live Fetched Website Icon */}
+        <div className="mb-5 flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <SiteIcon
+              domainOrUrl={url || lockedDomain || ""}
+              label={detectedAppName || lockedAppName || "New"}
+              size="md"
+            />
+            <div className="min-w-0">
+              <h2 className="vault-text-primary truncate text-lg font-extrabold">
+                {isEdit
+                  ? `Edit ${initialItem?.appName} Account`
+                  : lockedDomain
+                    ? `Add ${lockedAppName} Account`
+                    : detectedAppName
+                      ? `Save to ${detectedAppName}`
+                      : "Add New Vault Entry"}
               </h2>
-              <p className="text-[11px] text-slate-400">
-                All passwords, TOTP secrets &amp; recovery codes are AES-256-GCM
-                encrypted.
+              <p className="vault-text-muted truncate text-[11px]">
+                {lockedDomain
+                  ? `Strictly locked to ${lockedDomain} URLs`
+                  : "Automatically groups by website domain & fetches its real icon"}
               </p>
             </div>
           </div>
 
           <button
             type="button"
-            onClick={onClose}
-            className="rounded-xl p-2 text-slate-400 hover:bg-slate-800 hover:text-white"
+            onClick={closeModal}
+            className="vault-inset vault-text-muted rounded-xl p-2 hover:text-amber-500"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
         {error && (
-          <div className="mb-4 rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-300">
-            {error}
+          <div className="mb-4 flex items-start gap-2 rounded-2xl border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-400">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{error}</span>
           </div>
         )}
 
         <div className="space-y-4">
-          {/* 1. Website URL & Optional Custom Title */}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-300">
-                Website URL *
-              </label>
-              <div className="relative">
-                <Globe className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
+          {/* 1. Website URL + Smart Segregation Indicator */}
+          <div className="space-y-2">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <label className="vault-text-secondary text-xs font-semibold">
+                    Website URL *
+                  </label>
+                  {lockedDomain && (
+                    <span className="rounded-full bg-amber-500/15 px-2 py-0.5 font-mono text-[10px] font-bold text-amber-500">
+                      Only {lockedDomain}
+                    </span>
+                  )}
+                </div>
+                <div className="relative">
+                  <Globe className="vault-text-muted pointer-events-none absolute left-3 top-2.5 h-4 w-4" />
+                  <input
+                    required
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    placeholder={
+                      lockedDomain
+                        ? `https://${lockedDomain}`
+                        : "google.com, github.com, discord.com..."
+                    }
+                    className={`vault-input w-full rounded-xl py-2.5 pl-9 pr-3 text-xs ${
+                      domainMismatch ? "!border-rose-500" : ""
+                    }`}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="vault-text-secondary mb-1 block text-xs font-semibold">
+                  Account Label (optional)
+                </label>
                 <input
-                  required
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  placeholder="https://github.com"
-                  className="w-full rounded-xl border border-slate-800 bg-slate-950 py-2.5 pl-9 pr-3 text-xs text-white placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none"
+                  value={label}
+                  onChange={(e) => setLabel(e.target.value)}
+                  placeholder="e.g. Personal, Work, Bot Dev"
+                  className="vault-input w-full rounded-xl px-3.5 py-2.5 text-xs"
                 />
               </div>
             </div>
 
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-300">
-                Service Name (optional — auto from URL)
-              </label>
-              <input
-                value={label}
-                onChange={(e) => setLabel(e.target.value)}
-                placeholder="e.g. GitHub, Discord, Google"
-                className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3.5 py-2.5 text-xs text-white placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none"
-              />
-            </div>
+            {/* Live Domain Segregation Feedback Pill */}
+            {domainMismatch ? (
+              <div className="flex items-center gap-2 rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-[11px] font-semibold text-rose-400">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                <span>
+                  Only <code>{lockedDomain}</code> URLs are allowed inside{" "}
+                  <strong>{lockedAppName}</strong>.
+                </span>
+              </div>
+            ) : detectedDomain && !isEdit ? (
+              <div className="vault-inset flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-[11px]">
+                <div className="flex min-w-0 items-center gap-2">
+                  {matchedExistingGroup ? (
+                    <>
+                      <Folders className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
+                      <span className="vault-text-secondary truncate">
+                        Existing{" "}
+                        <strong className="vault-text-primary">
+                          {matchedExistingGroup.appName}
+                        </strong>{" "}
+                        app found ({matchedExistingGroup.accountCount} account
+                        {matchedExistingGroup.accountCount === 1 ? "" : "s"}) —
+                        will add inside it.
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <FolderPlus className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                      <span className="vault-text-secondary truncate">
+                        Will create a new{" "}
+                        <strong className="vault-text-primary">
+                          {detectedAppName}
+                        </strong>{" "}
+                        (<code>{detectedDomain}</code>) app group.
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+            ) : null}
           </div>
 
           {/* 2. Email & Username (Either or Both) */}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-300">
+              <label className="vault-text-secondary mb-1 block text-xs font-semibold">
                 Email (optional)
               </label>
               <div className="relative">
-                <Mail className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
+                <Mail className="vault-text-muted pointer-events-none absolute left-3 top-2.5 h-4 w-4" />
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@example.com"
-                  className="w-full rounded-xl border border-slate-800 bg-slate-950 py-2.5 pl-9 pr-3 text-xs text-white placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none"
+                  className="vault-input w-full rounded-xl py-2.5 pl-9 pr-3 text-xs"
                 />
               </div>
             </div>
 
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-300">
-                Username (optional — use email, username, or both)
+              <label className="vault-text-secondary mb-1 block text-xs font-semibold">
+                Username (optional — use either or both)
               </label>
               <div className="relative">
-                <User className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
+                <User className="vault-text-muted pointer-events-none absolute left-3 top-2.5 h-4 w-4" />
                 <input
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder="e.g. sseofficial"
-                  className="w-full rounded-xl border border-slate-800 bg-slate-950 py-2.5 pl-9 pr-3 text-xs text-white placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none"
+                  className="vault-input w-full rounded-xl py-2.5 pl-9 pr-3 text-xs"
                 />
               </div>
             </div>
           </div>
 
-          {/* 3. Password */}
-          <div>
-            <div className="mb-1 flex items-center justify-between">
-              <label className="text-xs font-medium text-slate-300">
+          {/* 3. Password + Live Strength Bar + Generator */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="vault-text-secondary text-xs font-semibold">
                 Password
               </label>
               <button
@@ -281,25 +379,25 @@ export function VaultItemModal({
                   setPassword(generateStrongPassword(20));
                   setShowPassword(true);
                 }}
-                className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-400 hover:underline"
+                className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-500 hover:underline"
               >
                 <RefreshCw className="h-3 w-3" />
                 Generate Strong
               </button>
             </div>
             <div className="relative">
-              <Lock className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
+              <Lock className="vault-text-muted pointer-events-none absolute left-3 top-2.5 h-4 w-4" />
               <input
                 type={showPassword ? "text" : "password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Account password"
-                className="w-full rounded-xl border border-slate-800 bg-slate-950 py-2.5 pl-9 pr-10 font-mono text-xs text-white placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none"
+                className="vault-input w-full rounded-xl py-2.5 pl-9 pr-10 font-mono text-xs"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword((v) => !v)}
-                className="absolute right-2.5 top-2 rounded-lg p-1 text-slate-400 hover:text-white"
+                className="vault-text-muted absolute right-2.5 top-2 rounded-lg p-1 hover:text-amber-500"
               >
                 {showPassword ? (
                   <EyeOff className="h-4 w-4" />
@@ -308,19 +406,44 @@ export function VaultItemModal({
                 )}
               </button>
             </div>
+
+            {password && (
+              <div className="flex items-center gap-2 pt-0.5">
+                <div className="flex flex-1 gap-1">
+                  {[1, 2, 3, 4].map((lvl) => (
+                    <div
+                      key={lvl}
+                      className="h-1 flex-1 rounded-full transition-all"
+                      style={{
+                        backgroundColor:
+                          strength.score >= lvl
+                            ? strength.color
+                            : "var(--v-border-strong)",
+                      }}
+                    />
+                  ))}
+                </div>
+                <span
+                  className="text-[10px] font-bold uppercase tracking-wider"
+                  style={{ color: strength.color }}
+                >
+                  {strength.label}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* 4. TOTP Secret + Live Preview */}
           <div className="space-y-2.5">
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-300">
+              <label className="vault-text-secondary mb-1 block text-xs font-semibold">
                 TOTP Secret Key or <code>otpauth://</code> URI (optional)
               </label>
               <input
                 value={totpSecret}
                 onChange={(e) => setTotpSecret(e.target.value)}
                 placeholder="e.g. JBSWY3DPEHPK3PXP or otpauth://totp/..."
-                className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3.5 py-2.5 font-mono text-xs text-white placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none"
+                className="vault-input w-full rounded-xl px-3.5 py-2.5 font-mono text-xs"
               />
             </div>
 
@@ -329,24 +452,24 @@ export function VaultItemModal({
             )}
           </div>
 
-          {/* 5. Security / Backup Keys (.txt Upload — In-Memory Only, Never Stored!) */}
-          <div className="space-y-3 rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+          {/* 5. Zero-Storage .txt Security Key Importer */}
+          <div className="vault-inset space-y-3 rounded-2xl p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <div className="flex items-center gap-1.5 text-xs font-bold text-white">
-                  <FileText className="h-4 w-4 text-indigo-400" />
-                  Security / Backup Codes (.txt Importer)
+                <div className="vault-text-primary flex items-center gap-1.5 text-xs font-bold">
+                  <FileText className="h-4 w-4 text-amber-500" />
+                  Backup Security Keys (.txt Importer)
                 </div>
-                <p className="mt-0.5 text-[11px] text-slate-400">
-                  Upload any backup codes <code>.txt</code> file — codes are
-                  separated in memory and fed straight to the server.{" "}
-                  <strong className="text-emerald-400">
-                    The file is never stored.
+                <p className="vault-text-muted mt-0.5 text-[11px]">
+                  Upload any <code>.txt</code> codes file — codes are extracted
+                  in memory &amp; encrypted individually.{" "}
+                  <strong className="text-emerald-500">
+                    The .txt file is never stored.
                   </strong>
                 </p>
               </div>
               {isEdit && initialItem && initialItem.securityCodes.length > 0 && (
-                <div className="flex items-center gap-1 rounded-xl border border-slate-800 bg-slate-900 p-1 text-[10px] font-bold">
+                <div className="vault-card flex items-center gap-1 rounded-xl p-1 text-[10px] font-bold">
                   {(["keep", "append", "replace"] as const).map((m) => (
                     <button
                       key={m}
@@ -354,8 +477,8 @@ export function VaultItemModal({
                       onClick={() => setCodesMode(m)}
                       className={`rounded-lg px-2 py-1 capitalize ${
                         codesMode === m
-                          ? "bg-indigo-600 text-white"
-                          : "text-slate-400"
+                          ? "bg-amber-500 text-zinc-950"
+                          : "vault-text-muted"
                       }`}
                     >
                       {m}
@@ -365,7 +488,6 @@ export function VaultItemModal({
               )}
             </div>
 
-            {/* Drag-and-Drop .txt Zone */}
             <div
               onDragOver={(e) => {
                 e.preventDefault();
@@ -381,17 +503,16 @@ export function VaultItemModal({
               onClick={() => fileInputRef.current?.click()}
               className={`flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed p-5 text-center transition ${
                 isDragging
-                  ? "border-indigo-500 bg-indigo-500/15"
-                  : "border-slate-700 bg-slate-900/50 hover:border-indigo-500/70"
+                  ? "border-amber-500 bg-amber-500/10"
+                  : "border-zinc-500/30 hover:border-amber-500/70"
               }`}
             >
-              <Upload className="mb-2 h-6 w-6 text-indigo-400" />
-              <div className="text-xs font-bold text-white">
-                Tap to Upload <code>.txt</code> Backup Codes File
+              <Upload className="mb-2 h-6 w-6 text-amber-500" />
+              <div className="vault-text-primary text-xs font-bold">
+                Tap or Drop <code>.txt</code> Backup Codes File
               </div>
-              <div className="mt-0.5 text-[11px] text-slate-400">
-                Supports GitHub, Discord, Google, SSE Accounts &amp; plain code
-                lists
+              <div className="vault-text-muted mt-0.5 text-[11px]">
+                Auto-separates GitHub, Discord, Google &amp; SSE recovery kits
               </div>
               <input
                 ref={fileInputRef}
@@ -406,13 +527,12 @@ export function VaultItemModal({
             </div>
 
             {fileFeedback && (
-              <div className="flex items-start gap-2 rounded-xl border border-emerald-500/35 bg-emerald-500/10 p-2.5 text-[11px] text-emerald-300">
+              <div className="flex items-start gap-2 rounded-xl border border-emerald-500/35 bg-emerald-500/10 p-2.5 text-[11px] text-emerald-500">
                 <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 <span>{fileFeedback}</span>
               </div>
             )}
 
-            {/* Manual Code Entry */}
             <div className="flex gap-2">
               <input
                 value={manualCodeInput}
@@ -424,24 +544,23 @@ export function VaultItemModal({
                   }
                 }}
                 placeholder="Or paste / type security code(s) manually..."
-                className="flex-1 rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 font-mono text-xs text-white placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none"
+                className="vault-input flex-1 rounded-xl px-3 py-2 font-mono text-xs"
               />
               <button
                 type="button"
                 onClick={handleAddManualCodes}
-                className="inline-flex items-center gap-1 rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-white hover:border-indigo-500"
+                className="vault-card vault-text-primary inline-flex items-center gap-1 rounded-xl px-3 py-2 text-xs font-bold hover:border-amber-500"
               >
                 <Plus className="h-3.5 w-3.5" />
                 Add
               </button>
             </div>
 
-            {/* Extracted Codes Preview */}
             {parsedCodes.length > 0 && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-[11px]">
-                  <span className="font-semibold text-slate-300">
-                    Ready to Encrypt &amp; Save ({parsedCodes.length} codes):
+                  <span className="vault-text-secondary font-semibold">
+                    Separated Codes Ready ({parsedCodes.length}):
                   </span>
                   <button
                     type="button"
@@ -449,24 +568,27 @@ export function VaultItemModal({
                       setParsedCodes([]);
                       setFileFeedback(null);
                     }}
-                    className="text-rose-400 hover:underline"
+                    className="font-semibold text-rose-500 hover:underline"
                   >
                     Clear All
                   </button>
                 </div>
 
-                <div className="flex max-h-40 flex-wrap gap-1.5 overflow-y-auto rounded-xl border border-slate-800 bg-slate-900/70 p-2.5">
+                <div className="vault-card flex max-h-40 flex-wrap gap-1.5 overflow-y-auto rounded-xl p-2.5">
                   {parsedCodes.map((code) => (
                     <span
                       key={code}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1 font-mono text-xs text-indigo-300"
+                      className="vault-inset inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 font-mono text-xs font-semibold text-amber-500"
                     >
                       <span>{code}</span>
                       <button
                         type="button"
-                        onClick={() => removeParsedCode(code)}
-                        className="text-slate-500 hover:text-rose-400"
-                        title="Remove code"
+                        onClick={() =>
+                          setParsedCodes((prev) =>
+                            prev.filter((c) => c !== code)
+                          )
+                        }
+                        className="vault-text-muted hover:text-rose-500"
                       >
                         <X className="h-3 w-3" />
                       </button>
@@ -477,53 +599,57 @@ export function VaultItemModal({
             )}
           </div>
 
-          {/* 6. Notes & Favorite */}
+          {/* 6. Notes & Pin */}
           <div className="space-y-3">
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-300">
-                Notes (optional — encrypted)
+              <label className="vault-text-secondary mb-1 block text-xs font-semibold">
+                Encrypted Notes (optional)
               </label>
               <textarea
                 rows={2}
                 maxLength={1000}
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="Any extra recovery notes..."
-                className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3.5 py-2 text-xs text-white placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none"
+                placeholder="Any extra recovery notes or security question hints..."
+                className="vault-input w-full rounded-xl px-3.5 py-2 text-xs"
               />
             </div>
 
-            <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-300">
+            <label className="vault-text-secondary flex cursor-pointer items-center gap-2 text-xs font-medium">
               <input
                 type="checkbox"
                 checked={favorite}
                 onChange={(e) => setFavorite(e.target.checked)}
-                className="h-4 w-4 accent-indigo-500"
+                className="h-4 w-4 accent-amber-500"
               />
-              Pin this account to top (Favorite)
+              Mark as Favorite (pins app &amp; account to top)
             </label>
           </div>
         </div>
 
-        <div className="mt-6 flex items-center justify-end gap-2.5 border-t border-slate-800 pt-4">
+        <div className="vault-divider mt-6 flex items-center justify-end gap-2.5 border-t pt-4">
           <button
             type="button"
-            onClick={onClose}
-            className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-xs font-semibold text-slate-200 hover:bg-slate-700"
+            onClick={closeModal}
+            className="vault-inset vault-text-secondary rounded-xl px-4 py-2.5 text-xs font-semibold hover:opacity-80"
           >
             Cancel
           </button>
           <button
             type="submit"
-            disabled={saving}
-            className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-indigo-600/25 hover:bg-indigo-500 disabled:opacity-50"
+            disabled={saving || domainMismatch}
+            className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-5 py-2.5 text-xs font-extrabold text-zinc-950 shadow-lg shadow-amber-500/20 transition hover:bg-amber-400 disabled:opacity-50"
           >
             {saving ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <ShieldCheck className="h-4 w-4" />
             )}
-            {isEdit ? "Save Changes" : "Encrypt & Save to Vault"}
+            {isEdit
+              ? "Save Changes"
+              : lockedDomain
+                ? `Add to ${lockedAppName}`
+                : "Encrypt & Save"}
           </button>
         </div>
       </form>

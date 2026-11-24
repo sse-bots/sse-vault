@@ -4,7 +4,12 @@ import { z } from "zod";
 import { getVaultSession } from "@/lib/session";
 import { getVaultCollections } from "@/lib/mongodb";
 import { encryptSecret, generateCodeId } from "@/lib/crypto";
-import { inferLabelFromUrl, normalizeDisplayUrl } from "@/lib/parse-codes";
+import {
+  extractDomainKey,
+  getAppNameForDomain,
+  isUrlAllowedForDomain,
+  normalizeWebsiteUrl,
+} from "@/lib/domain";
 import { serializeVaultDoc } from "@/lib/vault-serializer";
 import type { StoredSecurityCode } from "@/lib/vault-types";
 
@@ -14,13 +19,13 @@ export const dynamic = "force-dynamic";
 const updateItemSchema = z.object({
   label: z.string().trim().max(80).optional(),
   url: z.string().trim().min(1).max(300).optional(),
+  expectedDomain: z.string().trim().max(120).optional(),
   email: z.string().trim().max(160).optional(),
   username: z.string().trim().max(120).optional(),
   password: z.string().max(512).optional(),
   totpSecret: z.string().trim().max(512).optional(),
   notes: z.string().trim().max(1000).optional(),
   favorite: z.boolean().optional(),
-  /** If provided, replaces or appends new security codes (preserving existing used states when appending) */
   securityCodesMode: z.enum(["keep", "append", "replace"]).optional(),
   securityCodes: z.array(z.string().trim().min(1).max(128)).max(100).optional(),
 });
@@ -62,11 +67,34 @@ export async function PATCH(
   const updates: Record<string, unknown> = { updatedAt: new Date() };
 
   if (d.url !== undefined) {
-    updates.url = normalizeDisplayUrl(d.url);
+    const cleanUrl = normalizeWebsiteUrl(d.url);
+    const domainKey = extractDomainKey(cleanUrl);
+    if (!domainKey) {
+      return NextResponse.json(
+        { error: "Please enter a valid website URL." },
+        { status: 400 }
+      );
+    }
+    if (d.expectedDomain && !isUrlAllowedForDomain(cleanUrl, d.expectedDomain)) {
+      const expectedKey = extractDomainKey(d.expectedDomain);
+      const expectedName = getAppNameForDomain(expectedKey);
+      return NextResponse.json(
+        {
+          error: `Only ${expectedKey} URLs are allowed inside ${expectedName}.`,
+        },
+        { status: 400 }
+      );
+    }
+    updates.url = cleanUrl;
+    updates.domainKey = domainKey;
+    updates.appName = getAppNameForDomain(domainKey);
   }
+
   if (d.label !== undefined) {
-    const cleanUrl = (updates.url as string) || String(existing.url || "");
-    updates.label = d.label.trim() || inferLabelFromUrl(cleanUrl);
+    const fallbackApp =
+      (updates.appName as string) ||
+      String(existing.appName || getAppNameForDomain(extractDomainKey(String(existing.url || ""))));
+    updates.label = d.label.trim() || fallbackApp;
   }
   if (d.email !== undefined) updates.email = d.email.trim() || null;
   if (d.username !== undefined) updates.username = d.username.trim() || null;

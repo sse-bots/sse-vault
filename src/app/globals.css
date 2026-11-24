@@ -1,441 +1,153 @@
 @import "tailwindcss";
 
 :root {
-  --accent-400: #4ade80;
-  --accent-500: #22c55e;
-  --accent-600: #16a34a;
-  --accent-on-solid: #ffffff;
-  --accent-glow: rgba(34, 197, 94, 0.28);
-  --accent-soft: rgba(34, 197, 94, 0.14);
-  --accent-hero-tint: rgba(34, 197, 94, 0.18);
-  --accent-border: rgba(34, 197, 94, 0.45);
+  --v-bg: #09090b;
+  --v-bg-elevated: #111115;
+  --v-bg-inset: #18181d;
+  --v-bg-hover: #222229;
+  --v-border: rgba(255, 255, 255, 0.08);
+  --v-border-strong: rgba(255, 255, 255, 0.16);
+  --v-text: #fafafa;
+  --v-text-secondary: #d4d4d8;
+  --v-text-muted: #8a8a97;
+  --v-amber: #f59e0b;
+  --v-amber-strong: #d97706;
+  --v-amber-soft: rgba(245, 158, 11, 0.14);
+  --v-cyan: #06b6d4;
+  --v-cyan-soft: rgba(6, 182, 212, 0.14);
+  --v-dot: rgba(255, 255, 255, 0.045);
+  --v-header: rgba(9, 9, 11, 0.82);
+}
 
-  --surface-bg: #070b14;
-  --surface-sidebar: #0b1120;
-  --surface-card: #0f172a;
-  --surface-input: #090f1d;
-  --surface-muted: #1e293b;
-  --surface-hover: #263449;
-  --surface-border: #1e293b;
-
-  --app-font: 'Public Sans', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --app-radius: 0.5rem;
+html.light {
+  color-scheme: light;
+  --v-bg: #f6f5f1;
+  --v-bg-elevated: #ffffff;
+  --v-bg-inset: #f0eee8;
+  --v-bg-hover: #e7e4dc;
+  --v-border: rgba(24, 24, 27, 0.09);
+  --v-border-strong: rgba(24, 24, 27, 0.18);
+  --v-text: #18181b;
+  --v-text-secondary: #3f3f46;
+  --v-text-muted: #71717a;
+  --v-amber: #d97706;
+  --v-amber-strong: #b45309;
+  --v-amber-soft: rgba(217, 119, 6, 0.12);
+  --v-cyan: #0891b2;
+  --v-cyan-soft: rgba(8, 145, 178, 0.12);
+  --v-dot: rgba(24, 24, 27, 0.055);
+  --v-header: rgba(246, 245, 241, 0.86);
 }
 
 html.dark {
   color-scheme: dark;
 }
-html.light {
-  color-scheme: light;
-}
 
 body {
-  background-color: var(--surface-bg);
-  color: #f4f6fb;
-  font-family: var(--app-font);
+  background-color: var(--v-bg);
+  background-image: radial-gradient(var(--v-dot) 1px, transparent 1px);
+  background-size: 22px 22px;
+  color: var(--v-text);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-html.light body {
-  color: #0f172a;
+/* Vault semantic utility helpers */
+.vault-card {
+  background-color: var(--v-bg-elevated);
+  border: 1px solid var(--v-border);
 }
 
-/* ==========================================================================
-   1. Neutral Surface Mapping (All 9 Nuxt UI Neutrals in Dark & Light Modes)
-   ========================================================================== */
-.bg-\[\#07090e\] {
-  background-color: var(--surface-bg) !important;
-}
-.bg-\[\#0a0d14\],
-.bg-\[\#0a0d14\]\/85,
-.bg-\[\#0b0e16\],
-.bg-\[\#0b1120\],
-.bg-\[\#0c0f17\],
-.bg-\[\#0c0f17\]\/90,
-.bg-\[\#0d111a\]\/95,
-.bg-\[\#0e1320\],
-.bg-\[\#111520\]\/95 {
-  background-color: var(--surface-sidebar) !important;
-}
-.bg-slate-900,
-.bg-slate-900\/30,
-.bg-slate-900\/40,
-.bg-slate-900\/50,
-.bg-slate-900\/60,
-.bg-slate-900\/70,
-.bg-slate-900\/80,
-.bg-slate-900\/90 {
-  background-color: var(--surface-card) !important;
-}
-.bg-slate-950,
-.bg-slate-950\/40,
-.bg-slate-950\/50,
-.bg-slate-950\/60,
-.bg-slate-950\/70,
-.bg-slate-950\/80,
-.bg-slate-950\/90 {
-  background-color: var(--surface-input) !important;
-}
-.bg-slate-800,
-.bg-slate-800\/70,
-.bg-slate-800\/80,
-.bg-slate-800\/90,
-.bg-slate-700,
-.bg-slate-700\/80 {
-  background-color: var(--surface-muted) !important;
-}
-.border-slate-800,
-.border-slate-800\/80,
-.border-slate-800\/90,
-.border-slate-700,
-.border-slate-700\/80,
-.border-slate-700\/90,
-.border-slate-600 {
-  border-color: var(--surface-border) !important;
-}
-.border-\[\#0c0f17\] {
-  border-color: var(--surface-card) !important;
-}
-.divide-slate-800 > :not(:last-child) {
-  border-color: var(--surface-border) !important;
+.vault-card-interactive {
+  background-color: var(--v-bg-elevated);
+  border: 1px solid var(--v-border);
+  transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
 }
 
-/* Interactive surface hovers */
-.hover\:bg-slate-900:hover,
-.hover\:bg-slate-900\/80:hover {
-  background-color: var(--surface-card) !important;
-}
-.hover\:bg-slate-800:hover,
-.hover\:bg-slate-800\/60:hover,
-.hover\:bg-slate-800\/70:hover,
-.hover\:bg-slate-800\/80:hover,
-.hover\:bg-slate-700:hover {
-  background-color: var(--surface-hover) !important;
+.vault-card-interactive:hover {
+  border-color: rgba(245, 158, 11, 0.45);
+  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, 0.35);
 }
 
-/* ==========================================================================
-   2. Adaptive Hero, Spotlight, & Brand Gradients (Fixes Dark Boxes in Light Mode)
-   ========================================================================== */
-.bg-gradient-to-br.from-slate-900,
-.bg-gradient-to-br.from-slate-900\/90,
-.bg-gradient-to-br.from-indigo-950\/60 {
-  background-image: linear-gradient(
-    135deg,
-    var(--surface-card) 0%,
-    var(--surface-input) 58%,
-    var(--accent-hero-tint) 100%
-  ) !important;
+html.light .vault-card-interactive:hover {
+  box-shadow: 0 12px 28px -12px rgba(24, 24, 27, 0.14);
 }
 
-.bg-gradient-to-br.from-emerald-950\/30 {
-  background-image: linear-gradient(
-    135deg,
-    rgba(16, 185, 129, 0.12) 0%,
-    var(--surface-card) 58%,
-    var(--surface-input) 100%
-  ) !important;
+.vault-inset {
+  background-color: var(--v-bg-inset);
+  border: 1px solid var(--v-border);
 }
 
-/* Brand "SSE" Logo Square Badge (works cleanly in Tailwind v4 + Light & Dark) */
-.bg-gradient-to-br.from-indigo-500.to-violet-600 {
-  background-image: linear-gradient(
-    135deg,
-    var(--accent-500) 0%,
-    var(--accent-600) 100%
-  ) !important;
-  color: var(--accent-on-solid) !important;
+.vault-input {
+  background-color: var(--v-bg-inset);
+  border: 1px solid var(--v-border-strong);
+  color: var(--v-text);
 }
 
-/* ==========================================================================
-   3. Light Mode Typography & High-Contrast Semantic Colors
-   ========================================================================== */
-html.light .text-white {
-  color: #0f172a !important;
-}
-html.light .text-slate-100,
-html.light .text-slate-200 {
-  color: #1e293b !important;
-}
-html.light .text-slate-300 {
-  color: #334155 !important;
-}
-html.light .text-slate-400,
-html.light .text-slate-500 {
-  color: #64748b !important;
-}
-html.light .hover\:text-white:hover {
-  color: #0f172a !important;
-}
-html.light .hover\:text-slate-300:hover {
-  color: #0f172a !important;
+.vault-input::placeholder {
+  color: var(--v-text-muted);
 }
 
-/* Make pastel status text crisp & accessible on white/light backgrounds */
-html.light .text-emerald-100,
-html.light .text-emerald-200,
-html.light .text-emerald-200\/80,
-html.light .text-emerald-300 {
-  color: #047857 !important;
-}
-html.light .text-emerald-400 {
-  color: #059669 !important;
-}
-html.light .text-rose-200,
-html.light .text-rose-200\/80,
-html.light .text-rose-300,
-html.light .hover\:text-rose-300:hover {
-  color: #be123c !important;
-}
-html.light .text-rose-400 {
-  color: #e11d48 !important;
-}
-html.light .text-amber-100,
-html.light .text-amber-200,
-html.light .text-amber-300,
-html.light .hover\:text-amber-200:hover {
-  color: #b45309 !important;
-}
-html.light .text-amber-400 {
-  color: #d97706 !important;
-}
-html.light .text-orange-200,
-html.light .text-orange-300 {
-  color: #c2410c !important;
-}
-html.light .text-orange-400 {
-  color: #ea580c !important;
-}
-html.light .text-sky-300 {
-  color: #0369a1 !important;
-}
-html.light .text-sky-400 {
-  color: #0284c7 !important;
-}
-html.light .text-violet-300 {
-  color: #6d28d9 !important;
-}
-html.light .text-violet-400 {
-  color: #7c3aed !important;
+.vault-input:focus {
+  border-color: var(--v-amber);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--v-amber-soft);
 }
 
-/* Soft floating dock & card elevation in Light Mode */
-html.light .shadow-\[0_10px_35px_rgba\(0\,0\,0\,0\.65\)\] {
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.14) !important;
-}
-html.light .border-white\/20 {
-  border-color: rgba(15, 23, 42, 0.15) !important;
-}
-
-/* ==========================================================================
-   4. Primary Accent Mapping & Solid Button Text Contrast (Higher Specificity)
-   ========================================================================== */
-.bg-indigo-600 {
-  background-color: var(--accent-600) !important;
-  color: var(--accent-on-solid) !important;
-}
-.bg-indigo-500 {
-  background-color: var(--accent-500) !important;
-}
-.hover\:bg-indigo-500:hover {
-  background-color: var(--accent-500) !important;
-}
-.hover\:bg-indigo-600:hover {
-  background-color: var(--accent-600) !important;
-  color: var(--accent-on-solid) !important;
+.vault-header {
+  background-color: var(--v-header);
+  border-bottom: 1px solid var(--v-border);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
-/* Preserve crisp button & badge text color on solid backgrounds in BOTH modes */
-html.light .bg-indigo-600,
-html.light .bg-indigo-600 *,
-html.dark .bg-indigo-600,
-html.dark .bg-indigo-600 *,
-html.light .bg-gradient-to-br.from-indigo-500.to-violet-600,
-html.light .bg-gradient-to-br.from-indigo-500.to-violet-600 *,
-html.dark .bg-gradient-to-br.from-indigo-500.to-violet-600,
-html.dark .bg-gradient-to-br.from-indigo-500.to-violet-600 * {
-  color: var(--accent-on-solid) !important;
+.vault-bottom-bar {
+  background-color: var(--v-header);
+  border-top: 1px solid var(--v-border);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
-html.light .bg-emerald-600,
-html.light .bg-emerald-600 *,
-html.light .bg-rose-600,
-html.light .bg-rose-600 *,
-html.light .bg-rose-600\/90,
-html.light .bg-rose-600\/90 *,
-html.light .bg-\[\#5865F2\],
-html.light .bg-\[\#5865F2\] * {
-  color: #ffffff !important;
+.vault-text-primary {
+  color: var(--v-text);
 }
 
-.text-indigo-400,
-.text-indigo-300 {
-  color: var(--accent-400) !important;
-}
-.bg-indigo-500\/10,
-.bg-indigo-500\/15,
-.bg-indigo-500\/20,
-.bg-indigo-600\/15,
-.bg-indigo-600\/20 {
-  background-color: var(--accent-soft) !important;
-}
-.border-indigo-500,
-.border-indigo-500\/30,
-.border-indigo-500\/40,
-.border-indigo-500\/50,
-.border-indigo-500\/60,
-.hover\:border-indigo-500:hover,
-.hover\:border-indigo-500\/50:hover,
-.hover\:border-indigo-500\/60:hover {
-  border-color: var(--accent-border) !important;
-}
-.border-t-indigo-400,
-.border-t-indigo-500 {
-  border-top-color: var(--accent-500) !important;
-}
-.shadow-indigo-500\/20,
-.shadow-indigo-500\/25,
-.shadow-indigo-600\/25 {
-  --tw-shadow-color: var(--accent-glow) !important;
+.vault-text-secondary {
+  color: var(--v-text-secondary);
 }
 
-/* ==========================================================================
-   5. Dynamic Border Radius Scaling (Nuxt UI Radius selector: 0rem -> 0.75rem)
-   ========================================================================== */
-.rounded-lg {
-  border-radius: calc(var(--app-radius) * 0.85) !important;
-}
-.rounded-xl {
-  border-radius: calc(var(--app-radius) * 1.25) !important;
-}
-.rounded-2xl {
-  border-radius: calc(var(--app-radius) * 1.75) !important;
-}
-.rounded-3xl {
-  border-radius: calc(var(--app-radius) * 2.25) !important;
+.vault-text-muted {
+  color: var(--v-text-muted);
 }
 
-/* ==========================================================================
-   6. Smooth Spring Sheet & Menu Animations
-   ========================================================================== */
-@keyframes sheetBackdropIn {
+.vault-divider {
+  border-color: var(--v-border);
+}
+
+@keyframes vaultModalIn {
   from {
     opacity: 0;
+    transform: translateY(18px) scale(0.98);
   }
   to {
-    opacity: 1;
-  }
-}
-
-@keyframes sheetSlideUp {
-  0% {
-    opacity: 0;
-    transform: translateY(28px) scale(0.97);
-  }
-  100% {
     opacity: 1;
     transform: translateY(0) scale(1);
   }
 }
 
-@keyframes menuItemStagger {
+@keyframes vaultFadeIn {
   from {
     opacity: 0;
-    transform: translateY(8px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
   }
 }
 
-.animate-backdrop-in {
-  animation: sheetBackdropIn 0.22s ease-out forwards;
+.animate-vault-modal {
+  animation: vaultModalIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-.animate-sheet-up {
-  animation: sheetSlideUp 0.26s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-.animate-menu-item {
-  animation: menuItemStagger 0.24s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-
-/* ==========================================================================
-   7. Two-Step Vault, OTP Box & Badge Showcase Micro-Animations
-   ========================================================================== */
-@keyframes otpPop {
-  0% {
-    transform: scale(0.92);
-  }
-  55% {
-    transform: scale(1.06);
-  }
-  100% {
-    transform: scale(1);
-  }
-}
-
-@keyframes otpShake {
-  0%, 100% {
-    transform: translateX(0);
-  }
-  20%, 60% {
-    transform: translateX(-6px);
-  }
-  40%, 80% {
-    transform: translateX(6px);
-  }
-}
-
-@keyframes vaultFloat {
-  0%, 100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-4px);
-  }
-}
-
-.animate-otp-pop {
-  animation: otpPop 0.18s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.animate-otp-shake {
-  animation: otpShake 0.34s ease-in-out;
-}
-
-.animate-vault-float {
-  animation: vaultFloat 3.4s ease-in-out infinite;
-}
-
-/* Light mode polish for new semantic tint colors (cyan, purple, pink) */
-html.light .text-cyan-300,
-html.light .text-cyan-400 {
-  color: #0e7490 !important;
-}
-html.light .text-purple-300,
-html.light .text-purple-400 {
-  color: #7e22ce !important;
-}
-html.light .bg-slate-950\/30 {
-  background-color: var(--surface-input) !important;
-}
-
-
-/* Dedicated Profile Cover Banner (crisp contrast in both Dark & Light modes) */
-.sse-profile-banner {
-  background-color: var(--surface-input);
-  background-image:
-    radial-gradient(circle at 18% 20%, var(--accent-hero-tint) 0%, transparent 58%),
-    radial-gradient(circle at 86% 80%, var(--accent-glow) 0%, transparent 52%),
-    linear-gradient(135deg, var(--surface-sidebar) 0%, var(--surface-card) 55%, var(--accent-soft) 100%);
-}
-
-html.light .sse-profile-banner {
-  background-color: var(--surface-input);
-  background-image:
-    radial-gradient(circle at 15% 25%, var(--accent-hero-tint) 0%, transparent 60%),
-    radial-gradient(circle at 88% 75%, var(--accent-glow) 0%, transparent 55%),
-    linear-gradient(135deg, var(--accent-soft) 0%, var(--surface-muted) 52%, var(--accent-hero-tint) 100%);
+.animate-vault-fade {
+  animation: vaultFadeIn 0.18s ease-out forwards;
 }

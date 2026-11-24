@@ -2,9 +2,9 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ExternalLink, Loader2, Lock, Shield } from "lucide-react";
+import { ExternalLink, KeyRound, Loader2, ShieldCheck } from "lucide-react";
 import { signIn } from "@/lib/auth-client";
-import { useAuth } from "@/components/AuthContext";
+import { useVault } from "@/components/VaultContext";
 
 const ACCOUNTS_URL = (
   process.env.NEXT_PUBLIC_SSE_ACCOUNTS_URL || "https://sse-account.vercel.app"
@@ -13,7 +13,7 @@ const ACCOUNTS_URL = (
 function SignInInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { user, loading: authLoading } = useAuth();
+  const { user, authLoading } = useVault();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -26,9 +26,7 @@ function SignInInner() {
   useEffect(() => {
     const err = searchParams.get("error");
     const desc = searchParams.get("error_description");
-    if (err) {
-      setError(desc || `Sign-in failed: ${err.replace(/_/g, " ")}`);
-    }
+    if (err) setError(desc || `Sign-in failed: ${err.replace(/_/g, " ")}`);
   }, [searchParams]);
 
   useEffect(() => {
@@ -63,21 +61,24 @@ function SignInInner() {
 
   return (
     <div className="mx-auto mt-10 max-w-md">
-      <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-7 shadow-2xl sm:p-8">
+      <div className="vault-card rounded-3xl p-7 shadow-2xl sm:p-8">
         <div className="mb-6 flex flex-col items-center text-center">
-          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-lg shadow-indigo-500/25">
-            <Lock className="h-7 w-7" />
+          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 text-zinc-950 shadow-lg shadow-amber-500/25">
+            <KeyRound className="h-7 w-7" />
           </div>
-          <h1 className="text-2xl font-bold text-white">Sign in to SSE Vault</h1>
-          <p className="mt-2 text-xs leading-relaxed text-slate-400">
-            Unlock your encrypted passwords, live TOTP authenticators, and
-            backup security keys using your central{" "}
-            <strong className="text-white">SSE Account</strong>.
+          <h1 className="vault-text-primary text-2xl font-black">
+            Unlock SSE Vault
+          </h1>
+          <p className="vault-text-muted mt-2 text-xs leading-relaxed">
+            Sign in with your central{" "}
+            <strong className="vault-text-primary">SSE Account</strong> to
+            access your domain-grouped passwords, live TOTP codes, and backup
+            security keys.
           </p>
         </div>
 
         {error && (
-          <div className="mb-4 rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-300">
+          <div className="mb-4 rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-400">
             {error}
           </div>
         )}
@@ -86,24 +87,24 @@ function SignInInner() {
           type="button"
           disabled={loading}
           onClick={handleSseSignIn}
-          className="flex w-full items-center justify-center gap-2.5 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-600/25 transition hover:bg-indigo-500 disabled:opacity-60"
+          className="flex w-full items-center justify-center gap-2.5 rounded-2xl bg-amber-500 px-4 py-3 text-sm font-extrabold text-zinc-950 shadow-lg shadow-amber-500/20 transition hover:bg-amber-400 disabled:opacity-60"
         >
           {loading ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
-            <Shield className="h-4 w-4" />
+            <ShieldCheck className="h-4 w-4" />
           )}
           Continue with SSE Accounts
         </button>
 
-        <div className="mt-4 text-center">
+        <div className="mt-5 text-center">
           <a
             href={`${ACCOUNTS_URL}/sign-up`}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-400 hover:underline"
+            className="inline-flex items-center gap-1 text-xs font-bold text-amber-500 hover:underline"
           >
-            Don&apos;t have an SSE Account? Create one
+            Need an SSE Account? Create one
             <ExternalLink className="h-3 w-3" />
           </a>
         </div>
@@ -116,7 +117,9 @@ export default function SignInPage() {
   return (
     <Suspense
       fallback={
-        <div className="py-20 text-center text-slate-400">Loading...</div>
+        <div className="vault-text-muted py-20 text-center text-sm">
+          Loading...
+        </div>
       }
     >
       <SignInInner />
