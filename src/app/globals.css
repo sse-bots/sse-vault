@@ -11,12 +11,27 @@
   --v-text-secondary: #d4d4d8;
   --v-text-muted: #8a8a97;
   --v-amber: #f59e0b;
+  --v-amber-light: #fbbf24;
   --v-amber-strong: #d97706;
+  --v-amber-text: #fbbf24;
+  --v-accent-on-solid: #09090b;
   --v-amber-soft: rgba(245, 158, 11, 0.14);
+  --v-amber-border: rgba(245, 158, 11, 0.45);
+  --v-amber-glow: rgba(245, 158, 11, 0.28);
   --v-cyan: #06b6d4;
   --v-cyan-soft: rgba(6, 182, 212, 0.14);
   --v-dot: rgba(255, 255, 255, 0.045);
-  --v-header: rgba(9, 9, 11, 0.82);
+  --v-header: rgba(9, 9, 11, 0.88);
+  --app-font: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --app-radius: 0.5rem;
+
+  /* Safe-area & fixed header geometry for Mobile Browsers + Android Capacitor APK */
+  --vault-safe-top: env(safe-area-inset-top, 0px);
+  --vault-safe-right: env(safe-area-inset-right, 0px);
+  --vault-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --vault-safe-left: env(safe-area-inset-left, 0px);
+  --vault-header-height: calc(3.5rem + var(--vault-safe-top));
+  --vault-mobile-nav-height: 4.25rem;
 }
 
 html.light {
@@ -31,41 +46,84 @@ html.light {
   --v-text-secondary: #3f3f46;
   --v-text-muted: #71717a;
   --v-amber: #d97706;
+  --v-amber-light: #f59e0b;
   --v-amber-strong: #b45309;
+  --v-amber-text: #b45309;
   --v-amber-soft: rgba(217, 119, 6, 0.12);
+  --v-amber-border: rgba(217, 119, 6, 0.38);
+  --v-amber-glow: rgba(217, 119, 6, 0.22);
   --v-cyan: #0891b2;
   --v-cyan-soft: rgba(8, 145, 178, 0.12);
   --v-dot: rgba(24, 24, 27, 0.055);
-  --v-header: rgba(246, 245, 241, 0.86);
+  --v-header: rgba(246, 245, 241, 0.90);
 }
 
 html.dark {
   color-scheme: dark;
 }
 
+/* Use overflow-x: clip (NEVER hidden!) so sticky & fixed elements stay rock-solid */
+html,
 body {
+  width: 100%;
+  min-width: 320px;
+  min-height: 100%;
+  max-width: 100vw;
+  overflow-x: clip;
+  overscroll-behavior-x: none;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  min-height: 100dvh;
   background-color: var(--v-bg);
   background-image: radial-gradient(var(--v-dot) 1px, transparent 1px);
   background-size: 22px 22px;
   color: var(--v-text);
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+  font-family: var(--app-font);
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-/* Vault semantic utility helpers */
+button,
+a,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+a {
+  touch-action: manipulation;
+}
+
+input,
+select,
+textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* ==========================================================================
+   1. Vault Semantic Surfaces
+   ========================================================================== */
 .vault-card {
   background-color: var(--v-bg-elevated);
   border: 1px solid var(--v-border);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .vault-card-interactive {
   background-color: var(--v-bg-elevated);
   border: 1px solid var(--v-border);
+  min-width: 0;
+  overflow-wrap: anywhere;
   transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
 }
 
 .vault-card-interactive:hover {
-  border-color: rgba(245, 158, 11, 0.45);
+  border-color: var(--v-amber-border);
   box-shadow: 0 10px 30px -12px rgba(0, 0, 0, 0.35);
 }
 
@@ -97,15 +155,15 @@ html.light .vault-card-interactive:hover {
 .vault-header {
   background-color: var(--v-header);
   border-bottom: 1px solid var(--v-border);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
 }
 
 .vault-bottom-bar {
   background-color: var(--v-header);
   border-top: 1px solid var(--v-border);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
 }
 
 .vault-text-primary {
@@ -124,117 +182,103 @@ html.light .vault-card-interactive:hover {
   border-color: var(--v-border);
 }
 
-@keyframes vaultModalIn {
-  from {
-    opacity: 0;
-    transform: translateY(18px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+/* ==========================================================================
+   2. Dynamic Multi-Color Themer Mapping (Re-themes all amber accent utilities)
+   ========================================================================== */
+.bg-amber-500 {
+  background-color: var(--v-amber) !important;
+  color: var(--v-accent-on-solid) !important;
+}
+.bg-amber-500,
+.bg-amber-500 * {
+  color: var(--v-accent-on-solid) !important;
+}
+.hover\:bg-amber-400:hover {
+  background-color: var(--v-amber-light) !important;
+}
+.bg-amber-500\/10,
+.bg-amber-500\/15,
+.bg-amber-500\/5,
+.hover\:bg-amber-500\/10:hover {
+  background-color: var(--v-amber-soft) !important;
+}
+.text-amber-500,
+.text-amber-400,
+.hover\:text-amber-500:hover,
+.group:hover .group-hover\:text-amber-500 {
+  color: var(--v-amber-text) !important;
+}
+.border-amber-500,
+.border-amber-500\/30,
+.border-amber-500\/35,
+.border-amber-500\/40,
+.border-amber-500\/45,
+.border-amber-500\/50,
+.border-amber-500\/60,
+.border-amber-500\/70,
+.hover\:border-amber-500:hover,
+.hover\:border-amber-500\/50:hover,
+.hover\:border-amber-500\/60:hover,
+.hover\:border-amber-500\/70:hover {
+  border-color: var(--v-amber-border) !important;
+}
+.border-t-amber-500 {
+  border-top-color: var(--v-amber) !important;
+}
+.shadow-amber-500\/20,
+.shadow-amber-500\/25 {
+  --tw-shadow-color: var(--v-amber-glow) !important;
+}
+.accent-amber-500 {
+  accent-color: var(--v-amber) !important;
+}
+.group:hover .group-hover\:bg-amber-500 {
+  background-color: var(--v-amber) !important;
+  color: var(--v-accent-on-solid) !important;
+}
+.bg-gradient-to-br.from-amber-400.to-amber-600 {
+  background-image: linear-gradient(
+    135deg,
+    var(--v-amber-light) 0%,
+    var(--v-amber-strong) 100%
+  ) !important;
+  color: var(--v-accent-on-solid) !important;
+}
+.bg-gradient-to-br.from-amber-400.to-amber-600 * {
+  color: var(--v-accent-on-solid) !important;
 }
 
-@keyframes vaultFadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+/* Dynamic Border Radius Scaling from Theme Customizer */
+.rounded-lg {
+  border-radius: calc(var(--app-radius) * 0.85) !important;
+}
+.rounded-xl {
+  border-radius: calc(var(--app-radius) * 1.25) !important;
+}
+.rounded-2xl {
+  border-radius: calc(var(--app-radius) * 1.75) !important;
+}
+.rounded-3xl {
+  border-radius: calc(var(--app-radius) * 2.25) !important;
 }
 
-.animate-vault-modal {
-  animation: vaultModalIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-.animate-vault-fade {
-  animation: vaultFadeIn 0.18s ease-out forwards;
-}
-
-
-html,
-body {
-  overflow-x: hidden;
-  max-width: 100vw;
-}
-
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-.no-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-
-
-@keyframes pinShake {
-  0%, 100% { transform: translateX(0); }
-  20%, 60% { transform: translateX(-8px); }
-  40%, 80% { transform: translateX(8px); }
-}
-
-@keyframes pinDotPop {
-  0% { transform: scale(0.5); }
-  60% { transform: scale(1.2); }
-  100% { transform: scale(1); }
-}
-
-.animate-pin-shake {
-  animation: pinShake 0.34s ease-in-out;
-}
-
-.animate-pin-pop {
-  animation: pinDotPop 0.16s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-/* Responsive viewport and safe-area handling for mobile browsers and Capacitor. */
-:root {
-  --vault-safe-top: env(safe-area-inset-top, 0px);
-  --vault-safe-right: env(safe-area-inset-right, 0px);
-  --vault-safe-bottom: env(safe-area-inset-bottom, 0px);
-  --vault-safe-left: env(safe-area-inset-left, 0px);
-  --vault-mobile-nav-height: 4.25rem;
-}
-
-html,
-body {
-  width: 100%;
-  min-width: 320px;
-  min-height: 100%;
-  overscroll-behavior-x: none;
-  -webkit-text-size-adjust: 100%;
-}
-
-body {
-  min-height: 100dvh;
-}
-
-button,
-a,
-input,
-select,
-textarea {
-  -webkit-tap-highlight-color: transparent;
-}
-
-button,
-a {
-  touch-action: manipulation;
-}
-
-input,
-select,
-textarea {
-  min-width: 0;
-  max-width: 100%;
-}
-
+/* ==========================================================================
+   3. Rock-Solid Fixed Header + Safe-Area Layout Spacing (Mobile + Capacitor APK)
+   ========================================================================== */
 .vault-app-header {
-  height: calc(3.5rem + var(--vault-safe-top));
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  height: var(--vault-header-height);
   padding-top: var(--vault-safe-top);
   padding-left: var(--vault-safe-left);
   padding-right: var(--vault-safe-right);
+}
+
+.vault-shell-body {
+  padding-top: var(--vault-header-height);
 }
 
 .vault-main-content {
@@ -272,10 +316,12 @@ textarea {
   flex-shrink: 0;
 }
 
-.vault-card,
-.vault-card-interactive {
-  min-width: 0;
-  overflow-wrap: anywhere;
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 @media (max-width: 639px) {
@@ -317,13 +363,64 @@ textarea {
 }
 
 @media (min-width: 768px) {
-  .vault-app-header {
-    height: calc(4rem + var(--vault-safe-top));
+  :root {
+    --vault-header-height: calc(4rem + var(--vault-safe-top));
   }
 
   .vault-main-content {
     padding-bottom: 2.5rem;
   }
+}
+
+/* ==========================================================================
+   4. Animations
+   ========================================================================== */
+@keyframes vaultModalIn {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes vaultFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pinShake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-8px); }
+  40%, 80% { transform: translateX(8px); }
+}
+
+@keyframes pinDotPop {
+  0% { transform: scale(0.5); }
+  60% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
+.animate-vault-modal {
+  animation: vaultModalIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-vault-fade {
+  animation: vaultFadeIn 0.18s ease-out forwards;
+}
+
+.animate-pin-shake {
+  animation: pinShake 0.34s ease-in-out;
+}
+
+.animate-pin-pop {
+  animation: pinDotPop 0.16s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @media (prefers-reduced-motion: reduce) {

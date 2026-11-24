@@ -534,9 +534,45 @@ export function VaultEntryCard({
             </p>
           ) : (
             <>
-              <p className="vault-text-muted text-[10px]">
-                Tap any unused key to copy &amp; mask as <code>-------</code>.
-              </p>
+              {/* Remaining Keys Progress Bar + 1-Tap Copy Next Key */}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-500/20">
+                    <div
+                      className="h-full rounded-full transition-all duration-300"
+                      style={{
+                        width: `${Math.round((unusedCount / Math.max(1, totalCodes)) * 100)}%`,
+                        backgroundColor:
+                          unusedCount === 0
+                            ? "#ef4444"
+                            : unusedCount <= 2
+                              ? "#f59e0b"
+                              : "#10b981",
+                      }}
+                    />
+                  </div>
+                  <span className="vault-text-muted shrink-0 font-mono text-[10px]">
+                    {Math.round((unusedCount / Math.max(1, totalCodes)) * 100)}%
+                  </span>
+                </div>
+
+                {unusedCount > 0 && (
+                  <button
+                    type="button"
+                    disabled={busyCodeId !== null}
+                    onClick={() => {
+                      const nextUnused = item.securityCodes.find(
+                        (x) => !x.used && !x.locked
+                      );
+                      if (nextUnused) void handleUseCode(nextUnused);
+                    }}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-amber-500 px-2.5 py-1 text-[10px] font-extrabold text-zinc-950 transition hover:bg-amber-400 disabled:opacity-50"
+                  >
+                    <Copy className="h-3 w-3" />
+                    Use Next Key
+                  </button>
+                )}
+              </div>
 
               <div className="grid grid-cols-1 gap-1.5 min-[380px]:grid-cols-2">
                 {item.securityCodes.map((c) => {

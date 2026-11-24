@@ -10,6 +10,8 @@ import {
   useState,
 } from "react";
 import { usePathname } from "next/navigation";
+import { Capacitor } from "@capacitor/core";
+import { App as CapacitorApp } from "@capacitor/app";
 import type {
   VaultAppGroupSummary,
   VaultCategory,
@@ -60,6 +62,8 @@ interface VaultContextValue {
   setPrivacyBlur: (val: boolean | ((prev: boolean) => boolean)) => void;
   clipboardAutoClear: boolean;
   setClipboardAutoClear: (val: boolean) => void;
+  lockOnBackground: boolean;
+  setLockOnBackground: (val: boolean) => void;
   clipboardCountdown: number;
   copySensitiveText: (value: string, label: string) => Promise<void>;
   spotlightOpen: boolean;
@@ -98,6 +102,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
   const [privacyBlur, setPrivacyBlur] = useState(false);
   const [clipboardAutoClear, setClipboardAutoClearState] = useState(true);
+  const [lockOnBackground, setLockOnBackgroundState] = useState(false);
   const [clipboardCountdown, setClipboardCountdown] = useState(0);
 
   const [spotlightOpen, setSpotlightOpen] = useState(false);
@@ -126,11 +131,18 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     if (savedClip === "false") setClipboardAutoClearState(false);
     const savedBlur = window.localStorage.getItem("sse-vault-blur");
     if (savedBlur === "true") setPrivacyBlur(true);
+    const savedBgLock = window.localStorage.getItem("sse-vault-bg-lock");
+    if (savedBgLock === "true") setLockOnBackgroundState(true);
   }, []);
 
   const setClipboardAutoClear = useCallback((val: boolean) => {
     setClipboardAutoClearState(val);
     window.localStorage.setItem("sse-vault-clip-clear", String(val));
+  }, []);
+
+  const setLockOnBackground = useCallback((val: boolean) => {
+    setLockOnBackgroundState(val);
+    window.localStorage.setItem("sse-vault-bg-lock", String(val));
   }, []);
 
   const showToast = useCallback((msg: string) => {
@@ -305,6 +317,69 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [isVaultUnlocked]);
 
+  // Auto-lock on inactivity based on user's configured autoLockMinutes
+  useEffect(() => {
+    if (!isVaultUnlocked) return;
+    const mins = pinStatus?.autoLockMinutes ?? 30;
+    if (mins <= 0) return;
+
+    let idleTimer: number | null = null;
+    const resetTimer = () => {
+      if (idleTimer) window.clearTimeout(idleTimer);
+      idleTimer = window.setTimeout(() => {
+        void lockVault();
+      }, mins * 60 * 1000);
+    };
+
+    resetTimer();
+    const events: Array<keyof WindowEventMap> = [
+      "pointerdown",
+      "keydown",
+      "scroll",
+      "touchstart",
+    ];
+    for (const ev of events) {
+      window.addEventListener(ev, resetTimer, { passive: true });
+    }
+    return () => {
+      if (idleTimer) window.clearTimeout(idleTimer);
+      for (const ev of events) {
+        window.removeEventListener(ev, resetTimer);
+      }
+    };
+  }, [isVaultUnlocked, pinStatus?.autoLockMinutes, lockVault]);
+
+  // Optional immediate lock when switching tabs or minimizing Android APK
+  useEffect(() => {
+    if (!isVaultUnlocked || !lockOnBackground) return;
+
+    function handleVisibility() {
+      if (document.visibilityState === "hidden") {
+        void lockVault();
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    let removeCapListener: (() => void) | null = null;
+    if (Capacitor.isNativePlatform()) {
+      void CapacitorApp.addListener("appStateChange", ({ isActive }) => {
+        if (!isActive) {
+          void lockVault();
+        }
+      }).then((handle) => {
+        removeCapListener = () => {
+          void handle.remove();
+        };
+      });
+    }
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      removeCapListener?.();
+    };
+  }, [isVaultUnlocked, lockOnBackground, lockVault]);
+
+
   const upsertItem = useCallback((saved: VaultItemDTO) => {
     setItems((prev) => {
       const exists = prev.some((i) => i.id === saved.id);
@@ -465,6 +540,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         setPrivacyBlur,
         clipboardAutoClear,
         setClipboardAutoClear,
+        lockOnBackground,
+        setLockOnBackground,
         clipboardCountdown,
         copySensitiveText,
         spotlightOpen,
