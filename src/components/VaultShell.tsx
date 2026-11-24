@@ -30,6 +30,7 @@ import { VaultItemModal } from "@/components/VaultItemModal";
 import { VaultImportExportModal } from "@/components/VaultImportExportModal";
 import { VaultPinGate } from "@/components/VaultPinGate";
 import { SpotlightModal } from "@/components/SpotlightModal";
+import { AndroidUpdateNotice } from "@/components/AndroidUpdateNotice";
 
 const ACCOUNTS_URL = (
   process.env.NEXT_PUBLIC_SSE_ACCOUNTS_URL || "https://sse-account.vercel.app"
@@ -381,6 +382,8 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
+
+      <AndroidUpdateNotice />
 
       {/* Main Content — Strictly blocked behind 6-Digit PIN Gate on ALL /vault/* routes! */}
       <main className="mx-auto w-full max-w-6xl flex-1 px-3.5 pb-24 pt-5 sm:px-6 sm:pt-7 md:pb-10">
