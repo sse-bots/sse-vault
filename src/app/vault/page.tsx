@@ -6,6 +6,8 @@ import {
   AlertTriangle,
   ChevronRight,
   KeyRound,
+  LayoutGrid,
+  List,
   Lock,
   LogIn,
   Plus,
@@ -22,6 +24,7 @@ import { KeyRecoveryBanner } from "@/components/KeyRecoveryBanner";
 import { VAULT_CATEGORIES, type VaultCategory } from "@/lib/vault-types";
 
 type AppFilter = "all" | "oauth" | "totp" | "keys" | "favorites";
+type SortMode = "favorites" | "accounts" | "az" | "recent";
 
 export default function VaultAppsDirectoryPage() {
   const {
@@ -42,10 +45,12 @@ export default function VaultAppsDirectoryPage() {
   const [categoryFilter, setCategoryFilter] = useState<VaultCategory | "all">(
     "all"
   );
+  const [sortBy, setSortBy] = useState<SortMode>("favorites");
+  const [compactView, setCompactView] = useState(false);
 
   const filteredGroups = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return appGroups.filter((g) => {
+    const list = appGroups.filter((g) => {
       if (filter === "oauth" && g.oauthCount === 0) return false;
       if (filter === "totp" && g.totpCount === 0) return false;
       if (filter === "keys" && g.totalCodesCount === 0) return false;
@@ -63,7 +68,20 @@ export default function VaultAppsDirectoryPage() {
         g.previewIdentities.some((id) => id.toLowerCase().includes(q))
       );
     });
-  }, [appGroups, query, filter, categoryFilter]);
+
+    return [...list].sort((a, b) => {
+      if (sortBy === "az") return a.appName.localeCompare(b.appName);
+      if (sortBy === "accounts")
+        return b.accountCount - a.accountCount || a.appName.localeCompare(b.appName);
+      if (sortBy === "recent")
+        return b.latestUpdatedAt.localeCompare(a.latestUpdatedAt);
+      return (
+        Number(b.hasFavorite) - Number(a.hasFavorite) ||
+        b.accountCount - a.accountCount ||
+        a.appName.localeCompare(b.appName)
+      );
+    });
+  }, [appGroups, query, filter, categoryFilter, sortBy]);
 
   const totals = useMemo(() => {
     const totalTotp = items.filter((i) => Boolean(i.totpSecret)).length;
@@ -243,6 +261,37 @@ export default function VaultAppsDirectoryPage() {
               </option>
             ))}
           </select>
+
+          <select
+            aria-label="Sort apps"
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as SortMode)}
+            className="vault-input shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold"
+          >
+            <option value="favorites">Sort: Favorites</option>
+            <option value="accounts">Sort: Most Accounts</option>
+            <option value="recent">Sort: Recent</option>
+            <option value="az">Sort: A–Z</option>
+          </select>
+
+          <button
+            type="button"
+            onClick={() => setCompactView((v) => !v)}
+            title={compactView ? "Switch to Card Grid" : "Switch to Compact List"}
+            className="vault-inset vault-text-secondary inline-flex shrink-0 items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold hover:border-amber-500/50 hover:text-amber-500"
+          >
+            {compactView ? (
+              <>
+                <LayoutGrid className="h-3.5 w-3.5" />
+                <span>Grid</span>
+              </>
+            ) : (
+              <>
+                <List className="h-3.5 w-3.5" />
+                <span>Compact</span>
+              </>
+            )}
+          </button>
         </div>
       </section>
 
@@ -287,12 +336,12 @@ export default function VaultAppsDirectoryPage() {
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-3.5 lg:grid-cols-3">
+        <div className={compactView ? "space-y-2" : "grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-3.5 lg:grid-cols-3"}>
           {filteredGroups.map((group) => (
             <Link
               key={group.domainKey}
               href={`/vault/${encodeURIComponent(group.domainKey)}`}
-              className="vault-card-interactive group flex min-w-0 flex-col justify-between gap-3.5 rounded-3xl p-4 sm:p-5"
+              className={`vault-card-interactive group flex min-w-0 ${compactView ? "flex-row items-center justify-between gap-3 rounded-2xl px-3.5 py-3" : "flex-col justify-between gap-3.5 rounded-3xl p-4 sm:p-5"}`}
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-3">
@@ -327,7 +376,7 @@ export default function VaultAppsDirectoryPage() {
                 </span>
               </div>
 
-              {group.previewIdentities.length > 0 && (
+              {!compactView && group.previewIdentities.length > 0 && (
                 <div className="vault-text-muted min-w-0 break-words font-mono text-[11px] leading-relaxed">
                   <span className={privacyBlur ? "blur-sm select-none" : ""}>
                     {group.previewIdentities.slice(0, 2).join(" · ")}

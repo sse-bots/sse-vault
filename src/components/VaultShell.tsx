@@ -31,6 +31,14 @@ import { VaultImportExportModal } from "@/components/VaultImportExportModal";
 import { VaultPinGate } from "@/components/VaultPinGate";
 import { SpotlightModal } from "@/components/SpotlightModal";
 import { AndroidUpdateNotice } from "@/components/AndroidUpdateNotice";
+import { ThemeCustomizer } from "@/components/ThemeCustomizer";
+import {
+  DEFAULT_THEME_STATE,
+  ThemeState,
+  applyThemeToDocument,
+  loadSavedTheme,
+  saveThemeState,
+} from "@/lib/theme-config";
 
 const ACCOUNTS_URL = (
   process.env.NEXT_PUBLIC_SSE_ACCOUNTS_URL || "https://sse-account.vercel.app"
@@ -56,27 +64,40 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
     toast,
   } = useVault();
 
-  const [mode, setMode] = useState<"dark" | "light">("dark");
+  const [theme, setTheme] = useState<ThemeState>(DEFAULT_THEME_STATE);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   useEffect(() => {
-    const saved = window.localStorage.getItem("sse-vault-mode");
-    const initial: "dark" | "light" = saved === "light" ? "light" : "dark";
-    setMode(initial);
-    document.documentElement.classList.remove("dark", "light");
-    document.documentElement.classList.add(initial);
+    const initial = loadSavedTheme();
+    setTheme(initial);
+    applyThemeToDocument(initial);
+
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    function onSystemChange() {
+      const latest = loadSavedTheme();
+      if (latest.mode === "system") applyThemeToDocument(latest);
+    }
+    media.addEventListener("change", onSystemChange);
+    return () => media.removeEventListener("change", onSystemChange);
   }, []);
 
   useEffect(() => {
     setUserMenuOpen(false);
   }, [pathname]);
 
-  function toggleMode() {
-    const next = mode === "dark" ? "light" : "dark";
-    setMode(next);
-    window.localStorage.setItem("sse-vault-mode", next);
-    document.documentElement.classList.remove("dark", "light");
-    document.documentElement.classList.add(next);
+  function updateTheme(next: ThemeState) {
+    setTheme(next);
+    saveThemeState(next);
+    applyThemeToDocument(next);
+  }
+
+  function quickToggleMode() {
+    const prefersDark =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const effectiveDark =
+      theme.mode === "dark" || (theme.mode === "system" && prefersDark);
+    updateTheme({ ...theme, mode: effectiveDark ? "light" : "dark" });
   }
 
   async function handleSignOut() {
@@ -128,9 +149,9 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
   const hasKeyAlert = lockedCount > 0 || recoveredCount > 0;
 
   return (
-    <div className="flex min-h-screen w-full flex-col overflow-x-hidden">
-      {/* Sticky Frosted Top Command Bar */}
-      <header className="vault-header vault-app-header sticky top-0 z-40 h-14 sm:h-16">
+    <div className="flex min-h-screen w-full flex-col overflow-x-clip">
+      {/* Rock-Solid Fixed Sticky Header (never scrolls away on Mobile, Android APK, or Desktop!) */}
+      <header className="vault-header vault-app-header">
         <div className="mx-auto flex h-full max-w-6xl items-center justify-between gap-2 px-3 sm:gap-3 sm:px-6">
           {/* Brand */}
           <Link
@@ -153,7 +174,7 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
             </div>
           </Link>
 
-          {/* Desktop Center Pill Navigation (only shown when vault is unlocked!) */}
+          {/* Desktop Center Pill Navigation */}
           {isVaultUnlocked && (
             <nav className="vault-inset hidden items-center gap-1 rounded-full p-1 md:flex">
               <Link
@@ -227,7 +248,7 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
                   type="button"
                   onClick={() => setPrivacyBlur((v) => !v)}
                   title={privacyBlur ? "Unblur Secrets" : "Privacy Blur"}
-                  className={`rounded-xl border p-2 transition ${
+                  className={`hidden rounded-xl border p-2 transition min-[400px]:inline-flex ${
                     privacyBlur
                       ? "border-amber-500 bg-amber-500/15 text-amber-500"
                       : "vault-inset vault-text-muted hover:text-amber-500"
@@ -260,16 +281,20 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
               </>
             )}
 
+            {/* Full Multi-Color Vault Theme Customizer */}
+            <ThemeCustomizer theme={theme} onChange={updateTheme} />
+
+            {/* Quick Light / Dark Mode Switch */}
             <button
               type="button"
-              onClick={toggleMode}
+              onClick={quickToggleMode}
               aria-label="Toggle Light/Dark Mode"
-              className="vault-inset vault-text-secondary rounded-xl p-2 transition hover:border-amber-500/50"
+              className="vault-inset vault-text-secondary hidden rounded-xl p-2 transition hover:border-amber-500/50 min-[360px]:inline-flex"
             >
-              {mode === "dark" ? (
-                <Sun className="h-4 w-4 text-amber-400" />
+              {theme.mode === "light" ? (
+                <Moon className="h-4 w-4 text-amber-500" />
               ) : (
-                <Moon className="h-4 w-4 text-amber-600" />
+                <Sun className="h-4 w-4 text-amber-400" />
               )}
             </button>
 
@@ -312,6 +337,21 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
                       <div className="mt-1 space-y-0.5">
                         {isVaultUnlocked && (
                           <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPrivacyBlur((v) => !v);
+                                setUserMenuOpen(false);
+                              }}
+                              className="vault-text-secondary flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium hover:bg-amber-500/10 min-[400px]:hidden"
+                            >
+                              {privacyBlur ? (
+                                <Eye className="h-3.5 w-3.5 text-amber-500" />
+                              ) : (
+                                <EyeOff className="h-3.5 w-3.5" />
+                              )}
+                              {privacyBlur ? "Unblur Secrets" : "Privacy Blur"}
+                            </button>
                             <Link
                               href="/vault/settings"
                               className="vault-text-secondary flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium hover:bg-amber-500/10"
@@ -383,12 +423,15 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <AndroidUpdateNotice />
+      {/* Content Wrapper offset cleanly below the Fixed Header */}
+      <div className="vault-shell-body flex flex-1 flex-col">
+        <AndroidUpdateNotice />
 
-      {/* Main Content — Strictly blocked behind 6-Digit PIN Gate on ALL /vault/* routes! */}
-      <main className="vault-main-content mx-auto w-full max-w-6xl flex-1 min-w-0 px-3.5 pb-24 pt-5 sm:px-6 sm:pt-7 md:pb-10">
-        {mustShowPinGate ? <VaultPinGate /> : children}
-      </main>
+        {/* Main Content — Strictly blocked behind 6-Digit PIN Gate on ALL /vault/* routes! */}
+        <main className="vault-main-content mx-auto w-full max-w-6xl flex-1 min-w-0 px-3.5 pb-24 pt-5 sm:px-6 sm:pt-7 md:pb-10">
+          {mustShowPinGate ? <VaultPinGate /> : children}
+        </main>
+      </div>
 
       {/* Footer */}
       <footer className="vault-divider hidden border-t py-5 md:block">
@@ -423,9 +466,12 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
         </div>
       </footer>
 
-      {/* Mobile Bottom Tab Bar (only shown once unlocked!) */}
+      {/* Native 5-Slot Mobile Bottom Tab Bar */}
       {isVaultUnlocked && (
-        <nav aria-label="Vault navigation" className="vault-bottom-bar vault-mobile-nav fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 px-1.5 py-1.5 md:hidden">
+        <nav
+          aria-label="Vault navigation"
+          className="vault-bottom-bar vault-mobile-nav fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 px-1.5 py-1.5 md:hidden"
+        >
           <Link
             href="/vault"
             className={`flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-bold ${
@@ -505,7 +551,7 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
         </div>
       )}
 
-      {/* Modals (strictly gated on isVaultUnlocked) */}
+      {/* Modals */}
       {isVaultUnlocked && modal.open && <VaultItemModal />}
       {isVaultUnlocked && importExportModal.open && <VaultImportExportModal />}
       {isVaultUnlocked && <SpotlightModal />}

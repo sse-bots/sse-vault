@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { Capacitor } from "@capacitor/core";
+import { App as CapacitorApp } from "@capacitor/app";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -8,6 +10,7 @@ import {
   CheckCircle2,
   Copy,
   Download,
+  ExternalLink,
   FileSpreadsheet,
   FileText,
   KeyRound,
@@ -18,6 +21,7 @@ import {
   Scale,
   ShieldAlert,
   ShieldCheck,
+  Smartphone,
   Sparkles,
   Upload,
 } from "lucide-react";
@@ -83,6 +87,8 @@ export default function VaultSettingsPage() {
     lockedCount,
     clipboardAutoClear,
     setClipboardAutoClear,
+    lockOnBackground,
+    setLockOnBackground,
     privacyBlur,
     setPrivacyBlur,
     openImportExportModal,
@@ -117,6 +123,21 @@ export default function VaultSettingsPage() {
     typeof window !== "undefined" ? buildRandomPassword(20, true) : ""
   );
   const [copiedGen, setCopiedGen] = useState(false);
+  const [platformInfo, setPlatformInfo] = useState<{
+    native: boolean;
+    version: string | null;
+  }>({ native: false, version: null });
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    void CapacitorApp.getInfo()
+      .then((info) => {
+        setPlatformInfo({ native: true, version: info.version || "1.0.0" });
+      })
+      .catch(() => {
+        setPlatformInfo({ native: true, version: "1.0.0" });
+      });
+  }, []);
 
   function regenerate(mode = genMode, len = genLength, sym = genSymbols) {
     setGenerated(
@@ -753,6 +774,53 @@ export default function VaultSettingsPage() {
             className="h-4 w-4 shrink-0 accent-amber-500"
           />
         </label>
+
+        <label className="vault-inset flex cursor-pointer items-center justify-between gap-4 rounded-2xl p-4">
+          <div className="min-w-0">
+            <div className="vault-text-primary text-xs font-bold">
+              Lock Immediately When Switching Apps / Tabs
+            </div>
+            <p className="vault-text-muted mt-0.5 text-[11px]">
+              Locks your vault right away whenever you minimize the Android APK
+              or switch browser tabs.
+            </p>
+          </div>
+          <input
+            type="checkbox"
+            checked={lockOnBackground}
+            onChange={(e) => setLockOnBackground(e.target.checked)}
+            className="h-4 w-4 shrink-0 accent-amber-500"
+          />
+        </label>
+
+        {/* Android APK & Platform Card */}
+        <div className="vault-inset flex flex-col justify-between gap-3 rounded-2xl p-4 sm:flex-row sm:items-center">
+          <div className="flex items-start gap-3">
+            <Smartphone className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+            <div className="min-w-0">
+              <div className="vault-text-primary text-xs font-bold">
+                {platformInfo.native
+                  ? `SSE Vault Android App (v${platformInfo.version})`
+                  : "SSE Vault Android APK"}
+              </div>
+              <p className="vault-text-muted mt-0.5 text-[11px]">
+                {platformInfo.native
+                  ? "Running inside the native Android APK shell with auto-update checks."
+                  : "Download the latest signed Android APK release directly from GitHub."}
+              </p>
+            </div>
+          </div>
+          <a
+            href="https://github.com/sse-bots/sse-vault/releases/latest"
+            target="_blank"
+            rel="noreferrer"
+            className="vault-card vault-text-primary inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold hover:border-amber-500 hover:text-amber-500"
+          >
+            <Download className="h-3.5 w-3.5 text-amber-500" />
+            Latest APK
+            <ExternalLink className="h-3 w-3" />
+          </a>
+        </div>
 
         <div className="flex flex-wrap gap-2 pt-2">
           <Link
