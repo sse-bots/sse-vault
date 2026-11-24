@@ -810,16 +810,24 @@ export default function VaultSettingsPage() {
               </p>
             </div>
           </div>
-          <a
-            href="https://github.com/sse-bots/sse-vault/releases/latest"
-            target="_blank"
-            rel="noreferrer"
-            className="vault-card vault-text-primary inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold hover:border-amber-500 hover:text-amber-500"
-          >
-            <Download className="h-3.5 w-3.5 text-amber-500" />
-            Latest APK
-            <ExternalLink className="h-3 w-3" />
-          </a>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <Link
+              href="/apk"
+              className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-amber-500 px-3.5 py-2 text-xs font-extrabold text-zinc-950 hover:bg-amber-400"
+            >
+              <Download className="h-3.5 w-3.5" />
+              APK Page
+            </Link>
+            <a
+              href="https://github.com/sse-bots/sse-vault/releases/latest"
+              target="_blank"
+              rel="noreferrer"
+              className="vault-card vault-text-primary inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold hover:border-amber-500 hover:text-amber-500"
+            >
+              GitHub
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-2 pt-2">
