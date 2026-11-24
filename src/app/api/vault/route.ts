@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getVaultSession } from "@/lib/session";
+import { requireUnlockedVaultSession } from "@/lib/vault-pin";
 import { getVaultCollections } from "@/lib/mongodb";
-import { encryptSecret, generateCodeId } from "@/lib/crypto";
+import {
+  encryptSecret,
+  generateCodeId,
+  getActiveKeyHex,
+  getKeyFingerprint,
+  shouldStoreHexcodeInDb,
+} from "@/lib/crypto";
 import {
   extractDomainKey,
   getAppNameForDomain,
@@ -20,8 +26,14 @@ const NO_CACHE = { "Cache-Control": "no-store" };
 const createItemSchema = z.object({
   label: z.string().trim().max(80).optional().default(""),
   url: z.string().trim().min(1, "Website URL is required.").max(300),
-  /** When adding inside a specific app page (e.g. /vault/github.com), strictly enforce that domain */
   expectedDomain: z.string().trim().max(120).optional(),
+  authType: z.enum(["password", "oauth"]).optional().default("password"),
+  oauthProvider: z.string().trim().max(60).optional().default(""),
+  category: z
+    .enum(["personal", "work", "dev", "gaming", "finance", "social", "other"])
+    .optional()
+    .default("personal"),
+  hasPasskey: z.boolean().optional().default(false),
   email: z.string().trim().max(160).optional().default(""),
   username: z.string().trim().max(120).optional().default(""),
   password: z.string().max(512).optional().default(""),
@@ -36,10 +48,9 @@ const createItemSchema = z.object({
 });
 
 export async function GET(req: Request) {
-  const ctx = await getVaultSession();
-  if (!ctx) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const guard = await requireUnlockedVaultSession();
+  if (!guard.ok) return guard.response;
+  const ctx = guard.session;
 
   const { searchParams } = new URL(req.url);
   const domainFilter = (searchParams.get("domain") || "").trim().toLowerCase();
@@ -56,14 +67,20 @@ export async function GET(req: Request) {
     items = items.filter((item) => item.domainKey === normalizedFilter);
   }
 
-  return NextResponse.json({ items }, { status: 200, headers: NO_CACHE });
+  return NextResponse.json(
+    {
+      items,
+      activeKeyFingerprint: getKeyFingerprint(),
+      storesHexcodeInDb: shouldStoreHexcodeInDb(),
+    },
+    { status: 200, headers: NO_CACHE }
+  );
 }
 
 export async function POST(req: Request) {
-  const ctx = await getVaultSession();
-  if (!ctx) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const guard = await requireUnlockedVaultSession();
+  if (!guard.ok) return guard.response;
+  const ctx = guard.session;
 
   const body = await req.json().catch(() => null);
   const parsed = createItemSchema.safeParse(body);
@@ -79,12 +96,14 @@ export async function POST(req: Request) {
   const domainKey = extractDomainKey(cleanUrl);
   if (!domainKey) {
     return NextResponse.json(
-      { error: "Please enter a valid website URL (e.g. github.com or google.com)." },
+      {
+        error:
+          "Please enter a valid website URL (e.g. github.com or google.com).",
+      },
       { status: 400 }
     );
   }
 
-  // Strict server-side domain enforcement when adding inside an app folder (e.g. /vault/github.com)
   if (d.expectedDomain && !isUrlAllowedForDomain(cleanUrl, d.expectedDomain)) {
     const expectedKey = extractDomainKey(d.expectedDomain);
     const expectedName = getAppNameForDomain(expectedKey);
@@ -96,8 +115,21 @@ export async function POST(req: Request) {
     );
   }
 
+  if (d.authType === "oauth") {
+    if (!d.email.trim()) {
+      return NextResponse.json(
+        { error: "Please enter the email address used for OAuth sign-in." },
+        { status: 400 }
+      );
+    }
+  }
+
   const appName = getAppNameForDomain(domainKey);
   const label = d.label.trim() || appName;
+
+  const activeHex = getActiveKeyHex();
+  const keyFingerprint = getKeyFingerprint(activeHex);
+  const storeHex = shouldStoreHexcodeInDb();
 
   const uniqueCodes = Array.from(
     new Set(d.securityCodes.map((c) => c.trim()).filter(Boolean))
@@ -109,6 +141,7 @@ export async function POST(req: Request) {
     length: code.length,
     used: false,
     usedAt: null,
+    ...(storeHex ? { hexcode: activeHex } : {}),
   }));
 
   const now = new Date();
@@ -118,13 +151,25 @@ export async function POST(req: Request) {
     appName,
     label,
     url: cleanUrl,
+    authType: d.authType,
+    oauthProvider:
+      d.authType === "oauth" ? d.oauthProvider.trim() || "Google" : null,
+    category: d.category,
+    hasPasskey: Boolean(d.hasPasskey),
     email: d.email.trim() || null,
-    username: d.username.trim() || null,
-    encryptedPassword: d.password ? encryptSecret(d.password) : null,
+    username: d.authType === "oauth" ? null : d.username.trim() || null,
+    encryptedPassword:
+      d.authType === "oauth"
+        ? null
+        : d.password
+          ? encryptSecret(d.password)
+          : null,
     encryptedTotpSecret: d.totpSecret ? encryptSecret(d.totpSecret) : null,
     securityCodes: encryptedCodes,
     encryptedNotes: d.notes ? encryptSecret(d.notes) : null,
     favorite: Boolean(d.favorite),
+    keyFingerprint,
+    ...(storeHex ? { hexcode: activeHex } : {}),
     createdAt: now,
     updatedAt: now,
   };

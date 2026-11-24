@@ -1,9 +1,14 @@
 import { NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 import { z } from "zod";
-import { getVaultSession } from "@/lib/session";
+import { requireUnlockedVaultSession } from "@/lib/vault-pin";
 import { getVaultCollections } from "@/lib/mongodb";
-import { encryptSecret, generateCodeId } from "@/lib/crypto";
+import {
+  encryptSecret,
+  generateCodeId,
+  getActiveKeyHex,
+  shouldStoreHexcodeInDb,
+} from "@/lib/crypto";
 import { serializeVaultDoc } from "@/lib/vault-serializer";
 import type { StoredSecurityCode } from "@/lib/vault-types";
 
@@ -30,10 +35,9 @@ export async function PATCH(
   req: Request,
   context: { params: Promise<{ id: string }> }
 ) {
-  const ctx = await getVaultSession();
-  if (!ctx) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const guard = await requireUnlockedVaultSession();
+  if (!guard.ok) return guard.response;
+  const ctx = guard.session;
 
   const { id } = await context.params;
   if (!ObjectId.isValid(id)) {
@@ -68,8 +72,7 @@ export async function PATCH(
 
   if (parsed.data.action === "toggle") {
     const { codeId, used } = parsed.data;
-    const found = prevCodes.some((c) => String(c.id) === codeId);
-    if (!found) {
+    if (!prevCodes.some((c) => String(c.id) === codeId)) {
       return NextResponse.json(
         { error: "Security code not found." },
         { status: 404 }
@@ -77,14 +80,12 @@ export async function PATCH(
     }
     nextCodes = prevCodes.map((c) =>
       String(c.id) === codeId
-        ? {
-            ...c,
-            used,
-            usedAt: used ? new Date() : null,
-          }
+        ? { ...c, used, usedAt: used ? new Date() : null }
         : c
     );
   } else {
+    const activeHex = getActiveKeyHex();
+    const storeHex = shouldStoreHexcodeInDb();
     const uniqueFresh = Array.from(
       new Set(parsed.data.codes.map((c) => c.trim()).filter(Boolean))
     );
@@ -94,6 +95,7 @@ export async function PATCH(
       length: code.length,
       used: false,
       usedAt: null,
+      ...(storeHex ? { hexcode: activeHex } : {}),
     }));
 
     nextCodes =

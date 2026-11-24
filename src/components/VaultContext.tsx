@@ -10,7 +10,11 @@ import {
   useState,
 } from "react";
 import { usePathname } from "next/navigation";
-import type { VaultAppGroupSummary, VaultItemDTO } from "@/lib/vault-types";
+import type {
+  VaultAppGroupSummary,
+  VaultCategory,
+  VaultItemDTO,
+} from "@/lib/vault-types";
 
 export interface VaultUser {
   userId: string;
@@ -23,6 +27,14 @@ export interface VaultUser {
   accountsUrl: string;
 }
 
+export interface ClientPinStatus {
+  hasPin: boolean;
+  unlocked: boolean;
+  autoLockMinutes: number;
+  failedAttempts: number;
+  lockedUntil: string | null;
+}
+
 interface ModalRequest {
   open: boolean;
   editingItem: VaultItemDTO | null;
@@ -32,18 +44,33 @@ interface ModalRequest {
 interface VaultContextValue {
   user: VaultUser | null;
   authLoading: boolean;
+  pinStatus: ClientPinStatus | null;
+  isVaultUnlocked: boolean;
+  setPinStatus: (next: ClientPinStatus | null) => void;
+  lockVault: () => Promise<void>;
   items: VaultItemDTO[];
   vaultLoading: boolean;
   vaultError: string | null;
+  activeKeyFingerprint: string | null;
+  storesHexcodeInDb: boolean;
+  recoveredCount: number;
+  lockedCount: number;
   appGroups: VaultAppGroupSummary[];
   privacyBlur: boolean;
   setPrivacyBlur: (val: boolean | ((prev: boolean) => boolean)) => void;
+  clipboardAutoClear: boolean;
+  setClipboardAutoClear: (val: boolean) => void;
+  clipboardCountdown: number;
+  copySensitiveText: (value: string, label: string) => Promise<void>;
   spotlightOpen: boolean;
   setSpotlightOpen: (val: boolean) => void;
   modal: ModalRequest;
   openAddModal: (lockedDomain?: string | null) => void;
   openEditModal: (item: VaultItemDTO, lockedDomain?: string | null) => void;
   closeModal: () => void;
+  importExportModal: { open: boolean; tab: "import" | "export" };
+  openImportExportModal: (tab?: "import" | "export") => void;
+  closeImportExportModal: () => void;
   refreshUser: () => Promise<VaultUser | null>;
   refreshVault: () => Promise<void>;
   upsertItem: (item: VaultItemDTO) => void;
@@ -58,23 +85,53 @@ const VaultContext = createContext<VaultContextValue | null>(null);
 export function VaultProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [user, setUser] = useState<VaultUser | null>(null);
+  const [pinStatus, setPinStatus] = useState<ClientPinStatus | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
   const [items, setItems] = useState<VaultItemDTO[]>([]);
   const [vaultLoading, setVaultLoading] = useState(false);
   const [vaultError, setVaultError] = useState<string | null>(null);
+  const [activeKeyFingerprint, setActiveKeyFingerprint] = useState<string | null>(
+    null
+  );
+  const [storesHexcodeInDb, setStoresHexcodeInDb] = useState(true);
 
   const [privacyBlur, setPrivacyBlur] = useState(false);
+  const [clipboardAutoClear, setClipboardAutoClearState] = useState(true);
+  const [clipboardCountdown, setClipboardCountdown] = useState(0);
+
   const [spotlightOpen, setSpotlightOpen] = useState(false);
   const [modal, setModal] = useState<ModalRequest>({
     open: false,
     editingItem: null,
     lockedDomain: null,
   });
+  const [importExportModal, setImportExportModal] = useState<{
+    open: boolean;
+    tab: "import" | "export";
+  }>({ open: false, tab: "import" });
+
   const [toast, setToast] = useState<string | null>(null);
 
   const inflightAuthRef = useRef<Promise<VaultUser | null> | null>(null);
   const toastTimerRef = useRef<number | null>(null);
+  const clipTimerRef = useRef<number | null>(null);
+
+  const isVaultUnlocked = Boolean(
+    user && pinStatus?.hasPin && pinStatus?.unlocked
+  );
+
+  useEffect(() => {
+    const savedClip = window.localStorage.getItem("sse-vault-clip-clear");
+    if (savedClip === "false") setClipboardAutoClearState(false);
+    const savedBlur = window.localStorage.getItem("sse-vault-blur");
+    if (savedBlur === "true") setPrivacyBlur(true);
+  }, []);
+
+  const setClipboardAutoClear = useCallback((val: boolean) => {
+    setClipboardAutoClearState(val);
+    window.localStorage.setItem("sse-vault-clip-clear", String(val));
+  }, []);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -83,6 +140,42 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       setToast(null);
     }, 3200);
   }, []);
+
+  const copySensitiveText = useCallback(
+    async (value: string, label: string) => {
+      try {
+        await navigator.clipboard.writeText(value);
+        showToast(
+          clipboardAutoClear
+            ? `${label} copied · auto-clears in 30s`
+            : `${label} copied to clipboard.`
+        );
+        if (clipTimerRef.current) {
+          window.clearInterval(clipTimerRef.current);
+          clipTimerRef.current = null;
+        }
+        if (clipboardAutoClear) {
+          setClipboardCountdown(30);
+          clipTimerRef.current = window.setInterval(() => {
+            setClipboardCountdown((prev) => {
+              if (prev <= 1) {
+                if (clipTimerRef.current) {
+                  window.clearInterval(clipTimerRef.current);
+                  clipTimerRef.current = null;
+                }
+                navigator.clipboard.writeText("").catch(() => {});
+                return 0;
+              }
+              return prev - 1;
+            });
+          }, 1000);
+        }
+      } catch {
+        showToast(`Could not copy ${label}.`);
+      }
+    },
+    [clipboardAutoClear, showToast]
+  );
 
   const refreshUser = useCallback(async (): Promise<VaultUser | null> => {
     if (inflightAuthRef.current) return inflightAuthRef.current;
@@ -104,9 +197,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         const d = (await res.json()) as {
           authenticated?: boolean;
           user?: VaultUser | null;
+          pinStatus?: ClientPinStatus | null;
         };
         const nextUser = d.authenticated && d.user ? d.user : null;
         setUser(nextUser);
+        setPinStatus(nextUser ? d.pinStatus || null : null);
         return nextUser;
       } catch {
         return null;
@@ -132,12 +227,30 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         setItems([]);
         return;
       }
+      if (res.status === 423) {
+        const j = await res.json().catch(() => ({}));
+        setItems([]);
+        setPinStatus((prev) => ({
+          hasPin: Boolean(j.hasPin ?? prev?.hasPin),
+          unlocked: false,
+          autoLockMinutes: prev?.autoLockMinutes ?? 30,
+          failedAttempts: prev?.failedAttempts ?? 0,
+          lockedUntil: prev?.lockedUntil ?? null,
+        }));
+        return;
+      }
       const j = await res.json();
       if (!res.ok) {
         setVaultError(j.error || "Could not load vault.");
         return;
       }
       setItems(Array.isArray(j.items) ? j.items : []);
+      if (typeof j.activeKeyFingerprint === "string") {
+        setActiveKeyFingerprint(j.activeKeyFingerprint);
+      }
+      if (typeof j.storesHexcodeInDb === "boolean") {
+        setStoresHexcodeInDb(j.storesHexcodeInDb);
+      }
     } catch {
       setVaultError("Network error while syncing vault.");
     } finally {
@@ -145,21 +258,41 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const lockVault = useCallback(async () => {
+    try {
+      await fetch("/api/vault/pin", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "lock" }),
+      });
+    } catch {
+      // ignore network error; lock UI anyway
+    }
+    setItems([]);
+    setSpotlightOpen(false);
+    setModal({ open: false, editingItem: null, lockedDomain: null });
+    setImportExportModal({ open: false, tab: "import" });
+    setPinStatus((prev) => (prev ? { ...prev, unlocked: false } : prev));
+    showToast("Vault locked.");
+  }, [showToast]);
+
   useEffect(() => {
     refreshUser();
   }, [pathname, refreshUser]);
 
+  // Only fetch encrypted vault entries AFTER 6-digit PIN is verified & unlocked!
   useEffect(() => {
-    if (!authLoading && user) {
+    if (!authLoading && isVaultUnlocked) {
       refreshVault();
-    } else if (!authLoading && !user) {
+    } else if (!authLoading && !isVaultUnlocked) {
       setItems([]);
     }
-  }, [authLoading, user, refreshVault]);
+  }, [authLoading, isVaultUnlocked, refreshVault]);
 
-  // Global keyboard shortcuts: Ctrl/Cmd+K (Spotlight), Shift+P (Privacy Blur)
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
+      if (!isVaultUnlocked) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setSpotlightOpen((v) => !v);
@@ -170,7 +303,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [isVaultUnlocked]);
 
   const upsertItem = useCallback((saved: VaultItemDTO) => {
     setItems((prev) => {
@@ -192,45 +325,69 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
   const clearUser = useCallback(() => {
     setUser(null);
+    setPinStatus(null);
     setItems([]);
     setAuthLoading(false);
   }, []);
 
-  const openAddModal = useCallback((lockedDomain: string | null = null) => {
-    setModal({ open: true, editingItem: null, lockedDomain });
-  }, []);
+  const openAddModal = useCallback(
+    (lockedDomain: string | null = null) => {
+      if (!isVaultUnlocked) return;
+      setModal({ open: true, editingItem: null, lockedDomain });
+    },
+    [isVaultUnlocked]
+  );
 
   const openEditModal = useCallback(
     (item: VaultItemDTO, lockedDomain: string | null = null) => {
+      if (!isVaultUnlocked) return;
       setModal({ open: true, editingItem: item, lockedDomain });
     },
-    []
+    [isVaultUnlocked]
   );
 
   const closeModal = useCallback(() => {
     setModal({ open: false, editingItem: null, lockedDomain: null });
   }, []);
 
-  // Automatically segregate all vault entries into domain-based App Groups
+  const openImportExportModal = useCallback(
+    (tab: "import" | "export" = "import") => {
+      if (!isVaultUnlocked) return;
+      setImportExportModal({ open: true, tab });
+    },
+    [isVaultUnlocked]
+  );
+
+  const closeImportExportModal = useCallback(() => {
+    setImportExportModal((prev) => ({ ...prev, open: false }));
+  }, []);
+
+  const recoveredCount = useMemo(
+    () =>
+      items.filter(
+        (i) =>
+          i.decryptionStatus === "recovered_db_hex" ||
+          i.decryptionStatus === "recovered_legacy_env"
+      ).length,
+    [items]
+  );
+
+  const lockedCount = useMemo(
+    () => items.filter((i) => i.decryptionStatus === "locked").length,
+    [items]
+  );
+
   const appGroups = useMemo<VaultAppGroupSummary[]>(() => {
     const map = new Map<
       string,
-      {
-        domainKey: string;
-        appName: string;
-        items: VaultItemDTO[];
-      }
+      { domainKey: string; appName: string; items: VaultItemDTO[] }
     >();
 
     for (const item of items) {
       const key = item.domainKey || "other";
       let group = map.get(key);
       if (!group) {
-        group = {
-          domainKey: key,
-          appName: item.appName || key,
-          items: [],
-        };
+        group = { domainKey: key, appName: item.appName || key, items: [] };
         map.set(key, group);
       }
       group.items.push(item);
@@ -238,6 +395,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
     return Array.from(map.values())
       .map((g) => {
+        const oauthCount = g.items.filter((i) => i.authType === "oauth").length;
         const totpCount = g.items.filter((i) => Boolean(i.totpSecret)).length;
         const unusedCodesCount = g.items.reduce(
           (acc, i) => acc + i.securityCodes.filter((c) => !c.used).length,
@@ -248,6 +406,12 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
           0
         );
         const hasFavorite = g.items.some((i) => i.favorite);
+        const hasLockedOrRecovered = g.items.some(
+          (i) => i.decryptionStatus !== "ok"
+        );
+        const categories = Array.from(
+          new Set(g.items.map((i) => i.category as VaultCategory))
+        );
         const previewIdentities = g.items
           .map((i) => i.email || i.username || i.label)
           .filter(Boolean)
@@ -261,10 +425,13 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
           domainKey: g.domainKey,
           appName: g.appName,
           accountCount: g.items.length,
+          oauthCount,
           totpCount,
           unusedCodesCount,
           totalCodesCount,
           hasFavorite,
+          hasLockedOrRecovered,
+          categories,
           previewIdentities,
           latestUpdatedAt,
         };
@@ -282,18 +449,33 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       value={{
         user,
         authLoading,
+        pinStatus,
+        isVaultUnlocked,
+        setPinStatus,
+        lockVault,
         items,
         vaultLoading,
         vaultError,
+        activeKeyFingerprint,
+        storesHexcodeInDb,
+        recoveredCount,
+        lockedCount,
         appGroups,
         privacyBlur,
         setPrivacyBlur,
+        clipboardAutoClear,
+        setClipboardAutoClear,
+        clipboardCountdown,
+        copySensitiveText,
         spotlightOpen,
         setSpotlightOpen,
         modal,
         openAddModal,
         openEditModal,
         closeModal,
+        importExportModal,
+        openImportExportModal,
+        closeImportExportModal,
         refreshUser,
         refreshVault,
         upsertItem,

@@ -1,9 +1,16 @@
 import { NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 import { z } from "zod";
-import { getVaultSession } from "@/lib/session";
+import { requireUnlockedVaultSession } from "@/lib/vault-pin";
 import { getVaultCollections } from "@/lib/mongodb";
-import { encryptSecret, generateCodeId } from "@/lib/crypto";
+import {
+  decryptWithFallback,
+  encryptSecret,
+  generateCodeId,
+  getActiveKeyHex,
+  getKeyFingerprint,
+  shouldStoreHexcodeInDb,
+} from "@/lib/crypto";
 import {
   extractDomainKey,
   getAppNameForDomain,
@@ -20,6 +27,12 @@ const updateItemSchema = z.object({
   label: z.string().trim().max(80).optional(),
   url: z.string().trim().min(1).max(300).optional(),
   expectedDomain: z.string().trim().max(120).optional(),
+  authType: z.enum(["password", "oauth"]).optional(),
+  oauthProvider: z.string().trim().max(60).optional(),
+  category: z
+    .enum(["personal", "work", "dev", "gaming", "finance", "social", "other"])
+    .optional(),
+  hasPasskey: z.boolean().optional(),
   email: z.string().trim().max(160).optional(),
   username: z.string().trim().max(120).optional(),
   password: z.string().max(512).optional(),
@@ -34,10 +47,9 @@ export async function PATCH(
   req: Request,
   context: { params: Promise<{ id: string }> }
 ) {
-  const ctx = await getVaultSession();
-  if (!ctx) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const guard = await requireUnlockedVaultSession();
+  if (!guard.ok) return guard.response;
+  const ctx = guard.session;
 
   const { id } = await context.params;
   if (!ObjectId.isValid(id)) {
@@ -64,6 +76,11 @@ export async function PATCH(
   }
 
   const d = parsed.data;
+  const activeHex = getActiveKeyHex();
+  const storeHex = shouldStoreHexcodeInDb();
+  const existingHex =
+    typeof existing.hexcode === "string" ? existing.hexcode : null;
+
   const updates: Record<string, unknown> = { updatedAt: new Date() };
 
   if (d.url !== undefined) {
@@ -93,14 +110,36 @@ export async function PATCH(
   if (d.label !== undefined) {
     const fallbackApp =
       (updates.appName as string) ||
-      String(existing.appName || getAppNameForDomain(extractDomainKey(String(existing.url || ""))));
+      String(
+        existing.appName ||
+          getAppNameForDomain(extractDomainKey(String(existing.url || "")))
+      );
     updates.label = d.label.trim() || fallbackApp;
   }
-  if (d.email !== undefined) updates.email = d.email.trim() || null;
-  if (d.username !== undefined) updates.username = d.username.trim() || null;
-  if (d.password !== undefined) {
-    updates.encryptedPassword = d.password ? encryptSecret(d.password) : null;
+
+  const nextAuthType =
+    d.authType ?? (existing.authType === "oauth" ? "oauth" : "password");
+  if (d.authType !== undefined) updates.authType = nextAuthType;
+  if (d.oauthProvider !== undefined || d.authType !== undefined) {
+    updates.oauthProvider =
+      nextAuthType === "oauth"
+        ? (d.oauthProvider ?? String(existing.oauthProvider || "Google")).trim() || "Google"
+        : null;
   }
+  if (d.category !== undefined) updates.category = d.category;
+  if (d.hasPasskey !== undefined) updates.hasPasskey = d.hasPasskey;
+  if (d.email !== undefined) updates.email = d.email.trim() || null;
+
+  if (nextAuthType === "oauth") {
+    updates.username = null;
+    updates.encryptedPassword = null;
+  } else {
+    if (d.username !== undefined) updates.username = d.username.trim() || null;
+    if (d.password !== undefined) {
+      updates.encryptedPassword = d.password ? encryptSecret(d.password) : null;
+    }
+  }
+
   if (d.totpSecret !== undefined) {
     updates.encryptedTotpSecret = d.totpSecret
       ? encryptSecret(d.totpSecret)
@@ -113,6 +152,7 @@ export async function PATCH(
     updates.favorite = d.favorite;
   }
 
+  // Handle security codes updates cleanly
   if (
     d.securityCodes !== undefined &&
     d.securityCodesMode &&
@@ -127,6 +167,7 @@ export async function PATCH(
       length: code.length,
       used: false,
       usedAt: null,
+      ...(storeHex ? { hexcode: activeHex } : {}),
     }));
 
     if (d.securityCodesMode === "replace") {
@@ -137,6 +178,36 @@ export async function PATCH(
         : [];
       updates.securityCodes = [...prev, ...newEntries].slice(0, 150);
     }
+  }
+
+  // Whenever secret fields are edited, also re-seal any remaining untouched secret fields with the active key
+  const editedSecrets =
+    d.password !== undefined ||
+    d.totpSecret !== undefined ||
+    d.notes !== undefined ||
+    (d.securityCodesMode && d.securityCodesMode !== "keep");
+
+  if (editedSecrets) {
+    if (nextAuthType !== "oauth" && d.password === undefined && existing.encryptedPassword) {
+      const dec = decryptWithFallback(String(existing.encryptedPassword), existingHex);
+      if (dec.value !== null && dec.source !== "primary") {
+        updates.encryptedPassword = encryptSecret(dec.value);
+      }
+    }
+    if (d.totpSecret === undefined && existing.encryptedTotpSecret) {
+      const dec = decryptWithFallback(String(existing.encryptedTotpSecret), existingHex);
+      if (dec.value !== null && dec.source !== "primary") {
+        updates.encryptedTotpSecret = encryptSecret(dec.value);
+      }
+    }
+    if (d.notes === undefined && existing.encryptedNotes) {
+      const dec = decryptWithFallback(String(existing.encryptedNotes), existingHex);
+      if (dec.value !== null && dec.source !== "primary") {
+        updates.encryptedNotes = encryptSecret(dec.value);
+      }
+    }
+    updates.keyFingerprint = getKeyFingerprint(activeHex);
+    if (storeHex) updates.hexcode = activeHex;
   }
 
   await vaultItems.updateOne(
@@ -159,10 +230,9 @@ export async function DELETE(
   _req: Request,
   context: { params: Promise<{ id: string }> }
 ) {
-  const ctx = await getVaultSession();
-  if (!ctx) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const guard = await requireUnlockedVaultSession();
+  if (!guard.ok) return guard.response;
+  const ctx = guard.session;
 
   const { id } = await context.params;
   if (!ObjectId.isValid(id)) {
