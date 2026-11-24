@@ -187,3 +187,152 @@ body {
 .animate-pin-pop {
   animation: pinDotPop 0.16s cubic-bezier(0.16, 1, 0.3, 1);
 }
+
+/* Responsive viewport and safe-area handling for mobile browsers and Capacitor. */
+:root {
+  --vault-safe-top: env(safe-area-inset-top, 0px);
+  --vault-safe-right: env(safe-area-inset-right, 0px);
+  --vault-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --vault-safe-left: env(safe-area-inset-left, 0px);
+  --vault-mobile-nav-height: 4.25rem;
+}
+
+html,
+body {
+  width: 100%;
+  min-width: 320px;
+  min-height: 100%;
+  overscroll-behavior-x: none;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  min-height: 100dvh;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+a {
+  touch-action: manipulation;
+}
+
+input,
+select,
+textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.vault-app-header {
+  height: calc(3.5rem + var(--vault-safe-top));
+  padding-top: var(--vault-safe-top);
+  padding-left: var(--vault-safe-left);
+  padding-right: var(--vault-safe-right);
+}
+
+.vault-main-content {
+  padding-left: max(0.875rem, var(--vault-safe-left));
+  padding-right: max(0.875rem, var(--vault-safe-right));
+  padding-bottom: calc(var(--vault-mobile-nav-height) + var(--vault-safe-bottom) + 1rem);
+}
+
+.vault-mobile-nav {
+  min-height: calc(var(--vault-mobile-nav-height) + var(--vault-safe-bottom));
+  padding-bottom: calc(0.375rem + var(--vault-safe-bottom));
+  padding-left: max(0.375rem, var(--vault-safe-left));
+  padding-right: max(0.375rem, var(--vault-safe-right));
+}
+
+.vault-mobile-nav a,
+.vault-mobile-nav button {
+  min-width: 0;
+  min-height: 2.75rem;
+  padding-top: 0.35rem;
+  padding-bottom: 0.35rem;
+}
+
+.vault-search-row > button {
+  min-height: 2.625rem;
+}
+
+.vault-filter-row {
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.vault-filter-row > * {
+  flex-shrink: 0;
+}
+
+.vault-card,
+.vault-card-interactive {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 639px) {
+  .vault-app-header > div {
+    gap: 0.375rem;
+    padding-left: 0.625rem;
+    padding-right: 0.625rem;
+  }
+
+  .vault-app-header > div > div:last-child {
+    gap: 0.25rem;
+  }
+
+  .vault-app-header button {
+    flex-shrink: 0;
+  }
+
+  .vault-main-content {
+    padding-top: 1rem;
+  }
+
+  .vault-search-row {
+    gap: 0.375rem;
+  }
+
+  .vault-search-row input {
+    font-size: 16px;
+  }
+
+  .vault-search-row > button {
+    padding-left: 0.625rem;
+    padding-right: 0.625rem;
+  }
+
+  .vault-filter-row {
+    margin-right: -0.25rem;
+    padding-right: 0.25rem;
+  }
+}
+
+@media (min-width: 768px) {
+  .vault-app-header {
+    height: calc(4rem + var(--vault-safe-top));
+  }
+
+  .vault-main-content {
+    padding-bottom: 2.5rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

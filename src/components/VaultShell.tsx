@@ -130,7 +130,7 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen w-full flex-col overflow-x-hidden">
       {/* Sticky Frosted Top Command Bar */}
-      <header className="vault-header sticky top-0 z-40 h-14 sm:h-16">
+      <header className="vault-header vault-app-header sticky top-0 z-40 h-14 sm:h-16">
         <div className="mx-auto flex h-full max-w-6xl items-center justify-between gap-2 px-3 sm:gap-3 sm:px-6">
           {/* Brand */}
           <Link
@@ -386,7 +386,7 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
       <AndroidUpdateNotice />
 
       {/* Main Content — Strictly blocked behind 6-Digit PIN Gate on ALL /vault/* routes! */}
-      <main className="mx-auto w-full max-w-6xl flex-1 px-3.5 pb-24 pt-5 sm:px-6 sm:pt-7 md:pb-10">
+      <main className="vault-main-content mx-auto w-full max-w-6xl flex-1 min-w-0 px-3.5 pb-24 pt-5 sm:px-6 sm:pt-7 md:pb-10">
         {mustShowPinGate ? <VaultPinGate /> : children}
       </main>
 
@@ -425,7 +425,7 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
 
       {/* Mobile Bottom Tab Bar (only shown once unlocked!) */}
       {isVaultUnlocked && (
-        <nav className="vault-bottom-bar fixed bottom-0 left-0 right-0 z-40 grid grid-cols-5 px-1.5 py-1.5 md:hidden">
+        <nav aria-label="Vault navigation" className="vault-bottom-bar vault-mobile-nav fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 px-1.5 py-1.5 md:hidden">
           <Link
             href="/vault"
             className={`flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-bold ${

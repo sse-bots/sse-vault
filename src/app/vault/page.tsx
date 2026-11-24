@@ -157,10 +157,11 @@ export default function VaultAppsDirectoryPage() {
 
       {/* Search + Horizontal-Safe Filter Controls */}
       <section className="space-y-3">
-        <div className="flex items-center gap-2">
+        <div className="vault-search-row flex min-w-0 items-center gap-2">
           <div className="relative min-w-0 flex-1">
             <Search className="vault-text-muted pointer-events-none absolute left-3.5 top-2.5 h-4 w-4" />
             <input
+              type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search apps (Google, GitHub...) or email..."
@@ -201,7 +202,7 @@ export default function VaultAppsDirectoryPage() {
         </div>
 
         {/* Scrollable Pill Filter Bar (zero mobile wrapping overflow!) */}
-        <div className="no-scrollbar flex items-center gap-2 overflow-x-auto pb-1">
+        <div className="no-scrollbar vault-filter-row flex min-w-0 items-center gap-2 overflow-x-auto pb-1">
           <div className="vault-inset flex shrink-0 items-center gap-1 rounded-full p-1">
             {(
               [
@@ -327,9 +328,9 @@ export default function VaultAppsDirectoryPage() {
               </div>
 
               {group.previewIdentities.length > 0 && (
-                <div className="vault-text-muted truncate font-mono text-[11px]">
+                <div className="vault-text-muted min-w-0 break-words font-mono text-[11px] leading-relaxed">
                   <span className={privacyBlur ? "blur-sm select-none" : ""}>
-                    {group.previewIdentities.join(" · ")}
+                    {group.previewIdentities.slice(0, 2).join(" · ")}
                     {group.accountCount > 2
                       ? ` +${group.accountCount - 2} more`
                       : ""}
