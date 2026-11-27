@@ -105,7 +105,7 @@ const K256 = [
   0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2,
 ];
 
-function sha256(msg: Uint8Array): Uint8Array {
+export function sha256(msg: Uint8Array): Uint8Array {
   const d = pad(msg);
   const dv = new DataView(d.buffer);
   const h = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19].map((x) => x | 0);
@@ -136,7 +136,7 @@ function sha256(msg: Uint8Array): Uint8Array {
   return out;
 }
 
-function hmac(hash: (m: Uint8Array) => Uint8Array, key: Uint8Array, msg: Uint8Array): Uint8Array {
+export function hmac(hash: (m: Uint8Array) => Uint8Array, key: Uint8Array, msg: Uint8Array): Uint8Array {
   const block = 64;
   let k = key.length > block ? hash(key) : key;
   const kp = new Uint8Array(block);
@@ -172,4 +172,8 @@ export function secondsLeft(cfg: TotpConfig, nowMs = Date.now()): number {
 export function formatCode(code: string): string {
   const mid = Math.ceil(code.length / 2);
   return `${code.slice(0, mid)} ${code.slice(mid)}`;
+}
+
+export function hmacSha256(key: Uint8Array, msg: Uint8Array): Uint8Array {
+  return hmac(sha256, key, msg);
 }

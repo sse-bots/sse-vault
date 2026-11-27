@@ -56,6 +56,21 @@ export interface MeResponse {
 
 export const api = {
   me: () => request<MeResponse>("/api/me"),
+  exportText: async (format: "json" | "csv") => {
+    const res = await fetch(`${API_BASE}/api/vault/export?format=${format}`, {
+      headers: {
+        "x-sse-client": "native",
+        Authorization: `Bearer ${tokens.session}`,
+        "x-vault-pin-token": tokens.pin || "",
+      },
+    });
+    if (!res.ok) throw new ApiError("Export failed. Unlock the vault and try again.", res.status, null);
+    return res.text();
+  },
+  importEntries: (body: unknown) =>
+    request<any>("/api/vault/import", { method: "POST", body: JSON.stringify(body) }),
+  reencrypt: () => request<any>("/api/vault/reencrypt", { method: "POST", body: "{}" }),
+
   logout: () => request("/api/auth/logout", { method: "POST" }).catch(() => null),
 
   pin: (body: Record<string, unknown>) =>

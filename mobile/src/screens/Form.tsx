@@ -4,7 +4,8 @@ import * as Crypto from "expo-crypto";
 import { api } from "../api";
 import { useVault } from "../vault";
 import { CATEGORIES, type Category, type ItemInput } from "../types";
-import { Button, Chip, Field, IconButton } from "../ui";
+import { Button, Chip, Field, IconButton, StrengthMeter } from "../ui";
+import { evaluatePasswordStrength } from "../lib/domain";
 import { c } from "../theme";
 
 const POOL = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%^&*-_";
@@ -19,10 +20,10 @@ function generatePassword(len = 20) {
 
 const PROVIDERS = ["Google", "GitHub", "Discord", "Microsoft", "Apple", "SSE Accounts"];
 
-export default function Form({ id, onClose }: { id?: string; onClose: () => void }) {
+export default function Form({ id, presetUrl, onClose }: { id?: string; presetUrl?: string; onClose: () => void }) {
   const { items, refresh } = useVault();
   const existing = id ? items.find((i) => i.id === id) : undefined;
-  const [url, setUrl] = useState(existing?.url || "");
+  const [url, setUrl] = useState(existing?.url || presetUrl || "");
   const [label, setLabel] = useState(existing?.label || "");
   const [authType, setAuthType] = useState<"password" | "oauth">(existing?.authType || "password");
   const [provider, setProvider] = useState(existing?.oauthProvider || "Google");
@@ -94,7 +95,8 @@ export default function Form({ id, onClose }: { id?: string; onClose: () => void
         {authType === "password" && (
           <>
             <Field label="USERNAME" value={username} onChangeText={setUsername} />
-            <Field label="PASSWORD" value={password} onChangeText={setPassword} secureTextEntry={false} />
+            <Field label="PASSWORD" value={password} onChangeText={setPassword} />
+            {password ? (() => { const st = evaluatePasswordStrength(password); return <StrengthMeter score={st.score} label={st.label} color={st.color} />; })() : null}
             <Button title="Generate strong password" variant="ghost" icon="sparkles-outline"
               onPress={() => setPassword(generatePassword())} style={{ marginBottom: 16, height: 44 }} />
           </>

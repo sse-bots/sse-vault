@@ -40,7 +40,7 @@ export function PinPad({ value, onChange, length = 6, onBio }: {
 }
 
 export default function PinScreen() {
-  const { phase, setupPin, unlock, unlockWithBiometrics, bioEnabled, error, clearError, busy, signOut, user } = useAuth();
+  const { phase, setupPin, unlock, unlockWithBiometrics, bioEnabled, error, clearError, busy, signOut, user, offline } = useAuth();
   const setup = phase === "pinSetup";
   const [pin, setPin] = useState("");
   const [first, setFirst] = useState<string | null>(null);
@@ -69,6 +69,7 @@ export default function PinScreen() {
   const title = setup ? (first ? "Confirm your PIN" : "Create a Vault PIN") : "Unlock your vault";
   const sub = setup
     ? "Choose a 6-digit PIN. You'll use it to unlock the vault."
+    : offline ? "Offline · opening your encrypted local copy (read-only)"
     : user ? `Signed in as ${user.name}` : "";
 
   return (
