@@ -1,6 +1,7 @@
 import type { Document } from "mongodb";
 import { decryptWithFallback, type DecryptionSource } from "./crypto";
 import { extractDomainKey, getAppNameForDomain } from "./domain";
+import { resolveOAuthProviderDomain } from "./oauth-links";
 import type {
   StoredSecurityCode,
   VaultAuthType,
@@ -134,6 +135,22 @@ export function serializeVaultDoc(doc: Document): VaultItemDTO {
     oauthProvider:
       authType === "oauth" && typeof doc.oauthProvider === "string" && doc.oauthProvider.trim()
         ? doc.oauthProvider.trim()
+        : null,
+    oauthProviderDomain:
+      authType === "oauth"
+        ? (typeof doc.oauthProviderDomain === "string" && doc.oauthProviderDomain.trim()
+            ? doc.oauthProviderDomain.trim().toLowerCase()
+            : resolveOAuthProviderDomain({
+                oauthProvider:
+                  typeof doc.oauthProvider === "string" ? doc.oauthProvider : null,
+                oauthProviderDomain: null,
+              }) || null)
+        : null,
+    oauthLinkedItemId:
+      authType === "oauth" &&
+      typeof doc.oauthLinkedItemId === "string" &&
+      doc.oauthLinkedItemId.trim()
+        ? doc.oauthLinkedItemId.trim()
         : null,
     category,
     hasPasskey: Boolean(doc.hasPasskey),

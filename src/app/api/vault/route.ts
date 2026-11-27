@@ -16,6 +16,7 @@ import {
   normalizeWebsiteUrl,
 } from "@/lib/domain";
 import { serializeVaultDoc } from "@/lib/vault-serializer";
+import { resolveOAuthProviderDomain } from "@/lib/oauth-links";
 import type { StoredSecurityCode } from "@/lib/vault-types";
 
 export const runtime = "nodejs";
@@ -29,6 +30,8 @@ const createItemSchema = z.object({
   expectedDomain: z.string().trim().max(120).optional(),
   authType: z.enum(["password", "oauth"]).optional().default("password"),
   oauthProvider: z.string().trim().max(60).optional().default(""),
+  oauthProviderDomain: z.string().trim().max(120).optional().default(""),
+  oauthLinkedItemId: z.string().trim().max(64).optional().default(""),
   category: z
     .enum(["personal", "work", "dev", "gaming", "finance", "social", "other"])
     .optional()
@@ -154,6 +157,19 @@ export async function POST(req: Request) {
     authType: d.authType,
     oauthProvider:
       d.authType === "oauth" ? d.oauthProvider.trim() || "Google" : null,
+    oauthProviderDomain:
+      d.authType === "oauth"
+        ? (d.oauthProviderDomain.trim().toLowerCase() ||
+            resolveOAuthProviderDomain({
+              oauthProvider: d.oauthProvider.trim() || "Google",
+              oauthProviderDomain: null,
+            }) ||
+            null)
+        : null,
+    oauthLinkedItemId:
+      d.authType === "oauth" && d.oauthLinkedItemId.trim()
+        ? d.oauthLinkedItemId.trim()
+        : null,
     category: d.category,
     hasPasskey: Boolean(d.hasPasskey),
     email: d.email.trim() || null,

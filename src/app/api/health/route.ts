@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
-import { getSseIssuerUrl } from "@/lib/sse-sso";
+import { getAccountsBaseUrl, getOAuthClientId, getOAuthClientSecret } from "@/lib/auth";
 import { getKeyFingerprint, shouldStoreHexcodeInDb } from "@/lib/crypto";
+import { getLegacyBetterAuthCollectionsStatus } from "@/lib/legacy-auth-cleanup";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,10 +10,16 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   let dbOk = false;
   let dbError: string | null = null;
+  let legacyAuth: { hasLegacyCollections: boolean; collections: string[] } = {
+    hasLegacyCollections: false,
+    collections: [],
+  };
+
   try {
     const db = await getDb();
     await db.command({ ping: 1 });
     dbOk = true;
+    legacyAuth = await getLegacyBetterAuthCollectionsStatus();
   } catch (err) {
     dbError = err instanceof Error ? err.message : "MongoDB connection failed";
   }
@@ -22,7 +29,9 @@ export async function GET() {
       ok: dbOk,
       database: dbOk ? "connected" : "error",
       dbError,
-      ssoIssuer: getSseIssuerUrl(),
+      authMode: "stateless-oauth2-pkce-cookie",
+      legacyBetterAuthCollections: legacyAuth.collections,
+      ssoIssuer: getAccountsBaseUrl(),
       encryption: {
         activeKeyFingerprint: getKeyFingerprint(),
         storesHexcodeFallbackInDb: shouldStoreHexcodeInDb(),
@@ -31,12 +40,16 @@ export async function GET() {
         ),
       },
       config: {
-        hasBetterAuthUrl: Boolean(process.env.BETTER_AUTH_URL),
-        hasBetterAuthSecret: Boolean(process.env.BETTER_AUTH_SECRET),
+        hasAppUrl: Boolean(
+          process.env.NEXT_PUBLIC_APP_URL || process.env.BETTER_AUTH_URL
+        ),
+        hasSessionSecret: Boolean(
+          process.env.SESSION_SECRET || process.env.BETTER_AUTH_SECRET
+        ),
         hasVaultEncryptionSecret: Boolean(process.env.VAULT_ENCRYPTION_SECRET),
         hasMongoUri: Boolean(process.env.MONGODB_URI),
-        hasSseClientId: Boolean(process.env.SSE_CLIENT_ID),
-        hasSseClientSecret: Boolean(process.env.SSE_CLIENT_SECRET),
+        hasSseClientId: Boolean(getOAuthClientId()),
+        hasSseClientSecret: Boolean(getOAuthClientSecret()),
       },
     },
     { status: dbOk ? 200 : 503, headers: { "Cache-Control": "no-store" } }

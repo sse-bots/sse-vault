@@ -41,6 +41,7 @@ interface ModalRequest {
   open: boolean;
   editingItem: VaultItemDTO | null;
   lockedDomain: string | null;
+  presetOAuthParent: VaultItemDTO | null;
 }
 
 interface VaultContextValue {
@@ -69,7 +70,7 @@ interface VaultContextValue {
   spotlightOpen: boolean;
   setSpotlightOpen: (val: boolean) => void;
   modal: ModalRequest;
-  openAddModal: (lockedDomain?: string | null) => void;
+  openAddModal: (lockedDomain?: string | null, presetOAuthParent?: VaultItemDTO | null) => void;
   openEditModal: (item: VaultItemDTO, lockedDomain?: string | null) => void;
   closeModal: () => void;
   importExportModal: { open: boolean; tab: "import" | "export" };
@@ -110,6 +111,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     open: false,
     editingItem: null,
     lockedDomain: null,
+    presetOAuthParent: null,
   });
   const [importExportModal, setImportExportModal] = useState<{
     open: boolean;
@@ -283,7 +285,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     }
     setItems([]);
     setSpotlightOpen(false);
-    setModal({ open: false, editingItem: null, lockedDomain: null });
+    setModal({ open: false, editingItem: null, lockedDomain: null, presetOAuthParent: null });
     setImportExportModal({ open: false, tab: "import" });
     setPinStatus((prev) => (prev ? { ...prev, unlocked: false } : prev));
     showToast("Vault locked.");
@@ -422,7 +424,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   );
 
   const closeModal = useCallback(() => {
-    setModal({ open: false, editingItem: null, lockedDomain: null });
+    setModal({ open: false, editingItem: null, lockedDomain: null, presetOAuthParent: null });
   }, []);
 
   const openImportExportModal = useCallback(

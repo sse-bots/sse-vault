@@ -33,10 +33,14 @@ export interface VaultItemDTO {
   appName: string;
   label: string;
   url: string;
-  /** "password" (standard login) or "oauth" (Sign in with Google/GitHub/Discord/etc. — email only) */
+  /** "password" (standard login) or "oauth" (Sign in with Google/GitHub/Discord/etc.) */
   authType: VaultAuthType;
   /** Provider name when authType === "oauth" (e.g. "Google", "GitHub", "Discord") */
   oauthProvider: string | null;
+  /** Canonical root domain of the OAuth provider (e.g. "google.com", "github.com") */
+  oauthProviderDomain: string | null;
+  /** Exact vault_items._id of the parent provider account when linked inside SSE Vault */
+  oauthLinkedItemId: string | null;
   category: VaultCategory;
   hasPasskey: boolean;
   email: string | null;

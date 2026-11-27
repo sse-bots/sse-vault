@@ -25,7 +25,6 @@ import {
   Smartphone,
   Sun,
 } from "lucide-react";
-import { signOut } from "@/lib/auth-client";
 import { useVault } from "@/components/VaultContext";
 import { VaultItemModal } from "@/components/VaultItemModal";
 import { VaultImportExportModal } from "@/components/VaultImportExportModal";
@@ -108,13 +107,10 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
   async function handleSignOut() {
     setUserMenuOpen(false);
     try {
-      await fetch("/api/vault/pin", {
+      await fetch("/api/auth/logout", {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "lock" }),
       }).catch(() => {});
-      await signOut();
     } finally {
       clearUser();
       window.location.assign("/");

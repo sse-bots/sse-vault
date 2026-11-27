@@ -16,6 +16,7 @@ import {
   normalizeWebsiteUrl,
 } from "@/lib/domain";
 import { serializeVaultDoc } from "@/lib/vault-serializer";
+import { resolveOAuthProviderDomain } from "@/lib/oauth-links";
 import type { StoredSecurityCode, VaultItemDTO } from "@/lib/vault-types";
 
 export const runtime = "nodejs";
@@ -36,6 +37,7 @@ const importEntrySchema = z.object({
   label: z.string().trim().max(80).optional().default(""),
   authType: z.enum(["password", "oauth"]).optional().default("password"),
   oauthProvider: z.string().trim().max(60).optional().default(""),
+  oauthProviderDomain: z.string().trim().max(120).optional().default(""),
   category: z
     .enum(["personal", "work", "dev", "gaming", "finance", "social", "other"])
     .optional()
@@ -348,6 +350,11 @@ export async function POST(req: Request) {
       authType: d.authType,
       oauthProvider:
         d.authType === "oauth" ? d.oauthProvider.trim() || "Google" : null,
+      oauthProviderDomain:
+        d.authType === "oauth"
+          ? (d.oauthProviderDomain.trim().toLowerCase() || resolveOAuthProviderDomain({ oauthProvider: d.oauthProvider.trim() || "Google", oauthProviderDomain: null }) || null)
+          : null,
+      oauthLinkedItemId: null,
       category: d.category,
       hasPasskey: Boolean(d.hasPasskey),
       email: d.email.trim() || null,

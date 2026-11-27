@@ -4,8 +4,15 @@ import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Capacitor } from "@capacitor/core";
-import { Download, ExternalLink, KeyRound, Loader2, ShieldCheck, Smartphone } from "lucide-react";
-import { signIn } from "@/lib/auth-client";
+import {
+  Download,
+  ExternalLink,
+  KeyRound,
+  LogIn,
+  ShieldAlert,
+  ShieldCheck,
+  Smartphone,
+} from "lucide-react";
 import { useVault } from "@/components/VaultContext";
 
 const ACCOUNTS_URL = (
@@ -16,14 +23,10 @@ function SignInInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { user, authLoading } = useVault();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [isNative, setIsNative] = useState(false);
 
-  useEffect(() => {
-    setIsNative(Capacitor.isNativePlatform());
-  }, []);
-
+  const error =
+    searchParams.get("error_description") || searchParams.get("error");
   const nextParam = searchParams.get("next");
   const safeNext =
     nextParam && nextParam.startsWith("/") && !nextParam.startsWith("//")
@@ -31,10 +34,8 @@ function SignInInner() {
       : "/vault";
 
   useEffect(() => {
-    const err = searchParams.get("error");
-    const desc = searchParams.get("error_description");
-    if (err) setError(desc || `Sign-in failed: ${err.replace(/_/g, " ")}`);
-  }, [searchParams]);
+    setIsNative(Capacitor.isNativePlatform());
+  }, []);
 
   useEffect(() => {
     if (!authLoading && user) {
@@ -42,91 +43,86 @@ function SignInInner() {
     }
   }, [authLoading, user, router, safeNext]);
 
-  async function handleSseSignIn() {
-    setLoading(true);
-    setError(null);
-    try {
-      const origin = window.location.origin;
-      const res = await signIn.social({
-        provider: "sse",
-        callbackURL: `${origin}${safeNext}`,
-        errorCallbackURL: `${origin}/sign-in`,
-      });
-      if (res?.error) {
-        setError(res.error.message || "Could not start SSE Accounts sign-in.");
-        setLoading(false);
-      }
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Could not start SSE Accounts sign-in."
-      );
-      setLoading(false);
-    }
-  }
-
   return (
-    <div className="mx-auto mt-8 max-w-md sm:mt-12">
-      <div className="vault-card rounded-3xl p-6 shadow-2xl sm:p-8">
-        <div className="mb-6 flex flex-col items-center text-center">
-          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 text-zinc-950 shadow-lg shadow-amber-500/25">
+    <div className="mx-auto mt-6 max-w-md sm:mt-10">
+      <div className="vault-card overflow-hidden rounded-3xl shadow-2xl">
+        {/* Hero Header */}
+        <div className="vault-divider vault-inset border-b px-6 py-8 text-center">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 text-zinc-950 shadow-lg shadow-amber-500/25">
             <KeyRound className="h-7 w-7" />
           </div>
-          <h1 className="vault-text-primary text-2xl font-black">
-            Unlock SSE Vault
+          <h1 className="vault-text-primary mt-4 text-2xl font-black">
+            Sign in to SSE Vault
           </h1>
-          <p className="vault-text-muted mt-2 text-xs leading-relaxed">
-            Sign in with your central{" "}
+          <p className="vault-text-muted mt-1.5 text-xs leading-relaxed">
+            Authenticate securely with your centralized{" "}
             <strong className="vault-text-primary">SSE Account</strong> to
-            access your encrypted passwords, OAuth logins, live TOTP codes, and
-            backup security keys.
+            unlock your passwords, linked OAuth accounts, live TOTP codes, and
+            recovery keys.
           </p>
         </div>
 
-        {error && (
-          <div className="mb-4 rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-400">
-            {error}
-          </div>
-        )}
-
-        <button
-          type="button"
-          disabled={loading}
-          onClick={handleSseSignIn}
-          className="flex w-full items-center justify-center gap-2.5 rounded-2xl bg-amber-500 px-4 py-3 text-sm font-extrabold text-zinc-950 shadow-lg shadow-amber-500/20 transition hover:bg-amber-400 disabled:opacity-60"
-        >
-          {loading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <ShieldCheck className="h-4 w-4" />
+        {/* Body */}
+        <div className="space-y-4 p-6">
+          {error && (
+            <div className="flex items-start gap-2.5 rounded-2xl border border-rose-500/40 bg-rose-500/10 p-3.5 text-xs text-rose-400">
+              <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{error}</span>
+            </div>
           )}
-          Continue with SSE Accounts
-        </button>
 
-        <div className="mt-5 text-center">
+          {/* Direct full navigation to /api/auth/login (Tournament-style PKCE OAuth) */}
           <a
-            href={`${ACCOUNTS_URL}/sign-up`}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 text-xs font-bold text-amber-500 hover:underline"
+            href={`/api/auth/login?next=${encodeURIComponent(safeNext)}`}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-amber-500 px-5 py-3.5 text-sm font-extrabold text-zinc-950 shadow-lg shadow-amber-500/20 transition hover:bg-amber-400"
           >
-            Need an SSE Account? Create one
-            <ExternalLink className="h-3 w-3" />
+            <LogIn className="h-4 w-4" />
+            Continue with SSE Accounts
           </a>
-        </div>
 
-        <p className="vault-text-muted mt-6 text-center text-[11px]">
-          By continuing, you agree to our{" "}
-          <Link href="/terms" className="text-amber-500 hover:underline">
-            Terms of Service
-          </Link>{" "}
-          and{" "}
-          <Link href="/privacy" className="text-amber-500 hover:underline">
-            Privacy Policy
-          </Link>
-          .
-        </p>
+          <div className="vault-inset rounded-2xl p-4 text-[11px] leading-relaxed">
+            <div className="vault-text-primary flex items-center gap-1.5 font-bold">
+              <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
+              Fast &amp; Stateless SSE SSO
+            </div>
+            <p className="vault-text-muted mt-1">
+              Uses encrypted PKCE session cookies directly from{" "}
+              <a
+                href={ACCOUNTS_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="font-semibold text-amber-500 underline"
+              >
+                SSE Accounts
+              </a>{" "}
+              with your mandatory 6-digit Vault PIN protecting every entry.
+            </p>
+          </div>
+
+          <div className="text-center">
+            <a
+              href={`${ACCOUNTS_URL}/sign-up`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-xs font-bold text-amber-500 hover:underline"
+            >
+              Need an SSE Account? Create one
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          </div>
+
+          <p className="vault-text-muted pt-1 text-center text-[11px]">
+            By continuing, you agree to our{" "}
+            <Link href="/terms" className="text-amber-500 hover:underline">
+              Terms of Service
+            </Link>{" "}
+            and{" "}
+            <Link href="/privacy" className="text-amber-500 hover:underline">
+              Privacy Policy
+            </Link>
+            .
+          </p>
+        </div>
       </div>
 
       {!isNative && (
