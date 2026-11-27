@@ -16,6 +16,7 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const rawNext = searchParams.get("next") || "/vault";
+  const mobile = searchParams.get("mobile") === "1";
   const nextPath =
     rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/vault";
 
@@ -48,6 +49,7 @@ export async function GET(req: Request) {
     state,
     verifier,
     nextPath,
+    mobile,
     redirectUri,
     createdAt: Date.now(),
   });

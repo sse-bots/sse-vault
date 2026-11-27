@@ -10,8 +10,6 @@ import {
   useState,
 } from "react";
 import { usePathname } from "next/navigation";
-import { Capacitor } from "@capacitor/core";
-import { App as CapacitorApp } from "@capacitor/app";
 import type {
   VaultAppGroupSummary,
   VaultCategory,
@@ -351,7 +349,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     };
   }, [isVaultUnlocked, pinStatus?.autoLockMinutes, lockVault]);
 
-  // Optional immediate lock when switching tabs or minimizing Android APK
+  // Optional immediate lock when switching tabs or minimizing the app
   useEffect(() => {
     if (!isVaultUnlocked || !lockOnBackground) return;
 
@@ -362,22 +360,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     }
     document.addEventListener("visibilitychange", handleVisibility);
 
-    let removeCapListener: (() => void) | null = null;
-    if (Capacitor.isNativePlatform()) {
-      void CapacitorApp.addListener("appStateChange", ({ isActive }) => {
-        if (!isActive) {
-          void lockVault();
-        }
-      }).then((handle) => {
-        removeCapListener = () => {
-          void handle.remove();
-        };
-      });
-    }
-
     return () => {
       document.removeEventListener("visibilitychange", handleVisibility);
-      removeCapListener?.();
     };
   }, [isVaultUnlocked, lockOnBackground, lockVault]);
 

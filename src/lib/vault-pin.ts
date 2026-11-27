@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { getVaultCollections } from "./mongodb";
 import { getVaultSession, type VaultUserSession } from "./session";
@@ -182,7 +182,14 @@ export async function getVaultPinStatus(
   );
 
   const cookieStore = await cookies();
-  const token = cookieStore.get(PIN_COOKIE_NAME)?.value;
+  let token = cookieStore.get(PIN_COOKIE_NAME)?.value;
+  if (!token) {
+    try {
+      token = (await headers()).get("x-vault-pin-token") || undefined;
+    } catch {
+      /* no request context */
+    }
+  }
   const unlocked = verifyPinUnlockToken(token, userId, pinVersion);
 
   return {
@@ -231,3 +238,21 @@ export async function requireUnlockedVaultSession(): Promise<
 }
 
 export { MAX_FAILED_ATTEMPTS, LOCKOUT_MS };
+
+/**
+ * For the native app only (header `x-sse-client: native`): returns the signed
+ * unlock token so the app can keep it in secure storage instead of a cookie.
+ */
+export async function nativePinTokenFor(params: {
+  userId: string;
+  pinVersion: number;
+  autoLockMinutes: number;
+}): Promise<string | undefined> {
+  try {
+    const h = await headers();
+    if (h.get("x-sse-client") !== "native") return undefined;
+  } catch {
+    return undefined;
+  }
+  return signPinUnlockToken(params).token;
+}

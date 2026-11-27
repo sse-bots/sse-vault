@@ -68,13 +68,6 @@ export default function HomePage() {
                 Unlock with SSE Accounts
               </Link>
             )}
-            <Link
-              href="/apk"
-              className="vault-inset vault-text-primary inline-flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-bold transition hover:border-amber-500 hover:text-amber-500"
-            >
-              <Download className="h-4 w-4 text-amber-500" />
-              Android APK
-            </Link>
           </div>
         </div>
 
@@ -177,43 +170,8 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Android APK Callout Banner */}
-      <section className="vault-card flex flex-col justify-between gap-4 rounded-3xl border-amber-500/30 p-5 sm:flex-row sm:items-center sm:p-6">
-        <div className="flex items-start gap-3.5">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-amber-500/15 text-amber-500">
-            <Smartphone className="h-5 w-5" />
-          </div>
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="vault-text-primary text-base font-extrabold">
-                Official Android APK Ready
-              </h2>
-              <span className="rounded-full bg-amber-500/15 px-2.5 py-0.5 font-mono text-[10px] font-bold text-amber-500">
-                com.sse.vault
-              </span>
-            </div>
-            <p className="vault-text-muted mt-1 max-w-xl text-xs leading-relaxed">
-              Install SSE Vault natively on your Android phone for instant 2FA
-              codes, automatic lock when switching apps, and built-in GitHub
-              release updates.
-            </p>
-          </div>
-        </div>
-        <Link
-          href="/apk"
-          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-2xl bg-amber-500 px-5 py-3 text-xs font-extrabold text-zinc-950 shadow-md shadow-amber-500/20 transition hover:bg-amber-400"
-        >
-          <Download className="h-4 w-4" />
-          Download APK
-        </Link>
-      </section>
-
       {/* Mobile Legal Footer Links */}
       <div className="flex items-center justify-center gap-4 text-xs md:hidden">
-        <Link href="/apk" className="font-bold text-amber-500 hover:underline">
-          Android APK
-        </Link>
-        <span className="vault-text-muted">·</span>
         <Link href="/privacy" className="vault-text-muted hover:text-amber-500">
           Privacy Policy
         </Link>
