@@ -30,9 +30,6 @@ import { VaultItemModal } from "@/components/VaultItemModal";
 import { VaultImportExportModal } from "@/components/VaultImportExportModal";
 import { VaultPinGate } from "@/components/VaultPinGate";
 import { SpotlightModal } from "@/components/SpotlightModal";
-import { Capacitor } from "@capacitor/core";
-import { AndroidUpdateNotice } from "@/components/AndroidUpdateNotice";
-import { AndroidAppBanner } from "@/components/AndroidAppBanner";
 import { ThemeCustomizer } from "@/components/ThemeCustomizer";
 import {
   DEFAULT_THEME_STATE,
@@ -68,10 +65,8 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
 
   const [theme, setTheme] = useState<ThemeState>(DEFAULT_THEME_STATE);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [isNativeApp, setIsNativeApp] = useState(false);
 
   useEffect(() => {
-    setIsNativeApp(Capacitor.isNativePlatform());
     const initial = loadSavedTheme();
     setTheme(initial);
     applyThemeToDocument(initial);
@@ -151,7 +146,7 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-screen w-full flex-col overflow-x-clip">
-      {/* Rock-Solid Fixed Sticky Header (never scrolls away on Mobile, Android APK, or Desktop!) */}
+      {/* Rock-Solid Fixed Sticky Header (never scrolls away on Mobile or Desktop!) */}
       <header className="vault-header vault-app-header">
         <div className="mx-auto flex h-full max-w-6xl items-center justify-between gap-2 px-3 sm:gap-3 sm:px-6">
           {/* Brand */}
@@ -282,21 +277,6 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
               </>
             )}
 
-            {/* Quick Android APK Pill (shown on Web so users always see there's an app) */}
-            {!isNativeApp && (
-              <Link
-                href="/apk"
-                title="Download SSE Vault Android APK"
-                className={`inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-2 text-xs font-extrabold transition ${
-                  pathname === "/apk"
-                    ? "border-amber-500 bg-amber-500/15 text-amber-500"
-                    : "vault-inset vault-text-secondary hover:border-amber-500/60 hover:text-amber-500"
-                }`}
-              >
-                <Download className="h-3.5 w-3.5 text-amber-500" />
-                <span className="hidden sm:inline">APK</span>
-              </Link>
-            )}
 
             {/* Full Multi-Color Vault Theme Customizer */}
             <ThemeCustomizer theme={theme} onChange={updateTheme} />
@@ -389,18 +369,6 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
                             </button>
                           </>
                         )}
-                        <Link
-                          href="/apk"
-                          className="vault-text-secondary flex items-center justify-between rounded-xl px-3 py-2 text-xs font-semibold hover:bg-amber-500/10"
-                        >
-                          <span className="flex items-center gap-2">
-                            <Smartphone className="h-3.5 w-3.5 text-amber-500" />
-                            Android APK App
-                          </span>
-                          <span className="rounded bg-amber-500/15 px-1.5 py-0.5 font-mono text-[9px] font-bold text-amber-500">
-                            APK
-                          </span>
-                        </Link>
                         <a
                           href={`${ACCOUNTS_URL}/account`}
                           target="_blank"
@@ -454,8 +422,6 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
 
       {/* Content Wrapper offset cleanly below the Fixed Header */}
       <div className="vault-shell-body flex flex-1 flex-col">
-        <AndroidUpdateNotice />
-        <AndroidAppBanner />
 
         {/* Main Content — Strictly blocked behind 6-Digit PIN Gate on ALL /vault/* routes! */}
         <main className="vault-main-content mx-auto w-full max-w-6xl flex-1 min-w-0 px-3.5 pb-24 pt-5 sm:px-6 sm:pt-7 md:pb-10">
@@ -471,12 +437,6 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
             AES-256-GCM
           </span>
           <div className="flex items-center gap-4">
-            <Link
-              href="/apk"
-              className="font-bold text-amber-500 hover:underline"
-            >
-              Android APK
-            </Link>
             <Link
               href="/privacy"
               className="vault-text-muted font-medium hover:text-amber-500"

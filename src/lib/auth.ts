@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 
 export const SESSION_COOKIE = "sse_vault_session";
 export const OAUTH_STATE_COOKIE = "sse_vault_oauth_state";
@@ -110,9 +110,30 @@ export function createPkcePair() {
   return { verifier, challenge };
 }
 
+export const MOBILE_APP_SCHEME = "ssevault";
+
+/** True when the request comes from the native SSE Vault app. */
+export async function isNativeClient(): Promise<boolean> {
+  try {
+    const h = await headers();
+    return h.get("x-sse-client") === "native";
+  } catch {
+    return false;
+  }
+}
+
 export async function getSession(): Promise<StoredVaultSession | null> {
   const jar = await cookies();
-  const raw = jar.get(SESSION_COOKIE)?.value;
+  let raw = jar.get(SESSION_COOKIE)?.value;
+  if (!raw) {
+    // Native app: the encrypted session payload is sent as a Bearer token.
+    try {
+      const auth = (await headers()).get("authorization") || "";
+      if (/^Bearer\s+/i.test(auth)) raw = auth.replace(/^Bearer\s+/i, "").trim();
+    } catch {
+      /* no request context */
+    }
+  }
   if (!raw) return null;
   const session = decryptCookiePayload<StoredVaultSession>(raw);
   if (!session || !session.user?.sub) return null;

@@ -11,10 +11,6 @@ A mobile-first Obsidian-Carbon & Warm-Ivory security vault built with Next.js 15
 - **Live 2FA Wall, Security Audit, Password/Passphrase Generator, Privacy Policy & Terms of Service.**
 
 
-## Android APK
+## Native app
 
-The Capacitor Android shell and phone-friendly GitHub Actions workflow are
-documented in [ANDROID_SETUP.md](./ANDROID_SETUP.md). After configuring the
-one-time Android signing secrets, run **Actions → Build SSE Vault Android APK**
-or publish a GitHub Release to build a signed APK. The Android app loads the
-existing Vercel deployment, keeping server routes and credentials on the server.
+A native Android app (React Native / Expo) lives in [`mobile/`](./mobile). See [mobile/README.md](./mobile/README.md). Build it from **Actions → Build SSE Vault native app (APK)**.

@@ -1,0 +1,124 @@
+name: Build SSE Vault native app (APK)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: "Version name (x.y.z). Leave blank to use 1.0.RUN_NUMBER."
+        required: false
+        type: string
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+env:
+  ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+  ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+  ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+  ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+jobs:
+  build:
+    name: Build signed native APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install dependencies
+        run: |
+          npm install --no-audit --no-fund
+          npx expo install --fix
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Generate native Android project
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Version and signing
+        shell: bash
+        env:
+          REQUESTED_VERSION_NAME: ${{ inputs.version_name }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then VERSION_NAME="${GITHUB_REF_NAME#v}";
+          elif [[ -n "$REQUESTED_VERSION_NAME" ]]; then VERSION_NAME="$REQUESTED_VERSION_NAME";
+          else VERSION_NAME="1.0.${GITHUB_RUN_NUMBER}"; fi
+          [[ "$VERSION_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Bad version: $VERSION_NAME"; exit 1; }
+
+          : "${ANDROID_KEYSTORE_BASE64:?Missing ANDROID_KEYSTORE_BASE64 secret}"
+          : "${ANDROID_KEYSTORE_PASSWORD:?Missing ANDROID_KEYSTORE_PASSWORD secret}"
+          : "${ANDROID_KEY_ALIAS:?Missing ANDROID_KEY_ALIAS secret}"
+          : "${ANDROID_KEY_PASSWORD:?Missing ANDROID_KEY_PASSWORD secret}"
+
+          mkdir -p android/app/keystore
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/keystore/sse-vault-release.jks
+
+          # versionCode is offset so it is always higher than the old WebView-shell builds.
+          VERSION_CODE=$((1000 + GITHUB_RUN_NUMBER)) VERSION_NAME="$VERSION_NAME" python3 - <<'PY'
+          import os
+          from pathlib import Path
+          p = Path("android/app/build.gradle")
+          s = p.read_text()
+          s += '''
+
+          // SSE Vault CI signing + version
+          android {
+              signingConfigs {
+                  release {
+                      storeFile file("keystore/sse-vault-release.jks")
+                      storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                      keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                      keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+                  }
+                  defaultConfig {
+                      versionCode Integer.parseInt(System.getenv("VERSION_CODE"))
+                      versionName System.getenv("VERSION_NAME")
+                  }
+                  buildTypes {
+                      release { signingConfig signingConfigs.release }
+                  }
+              }
+          }
+          '''
+          p.write_text(s)
+          PY
+          echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$((1000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+
+      - name: Build release APK
+        working-directory: mobile/android
+        run: ./gradlew --no-daemon assembleRelease -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
+
+      - name: Rename APK
+        run: |
+          mkdir -p ../release-output
+          cp android/app/build/outputs/apk/release/app-release.apk "../release-output/SSE-Vault-${VERSION_NAME}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SSE-Vault-native-${{ github.run_number }}
+          path: release-output/SSE-Vault-${{ env.VERSION_NAME }}.apk
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Attach APK to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-output/SSE-Vault-${{ env.VERSION_NAME }}.apk
+          fail_on_unmatched_files: true

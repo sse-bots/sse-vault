@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "SSE Vault",
+    "slug": "sse-vault",
+    "scheme": "ssevault",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "icon": "./assets/icon.png",
+    "backgroundColor": "#09090b",
+    "splash": { "image": "./assets/splash.png", "resizeMode": "contain", "backgroundColor": "#09090b" },
+    "android": {
+      "package": "com.sse.vault",
+      "adaptiveIcon": { "foregroundImage": "./assets/adaptive-icon.png", "backgroundColor": "#09090b" },
+      "allowBackup": false,
+      "permissions": ["USE_BIOMETRIC", "USE_FINGERPRINT"]
+    },
+    "plugins": ["expo-secure-store", "expo-web-browser", "expo-local-authentication"]
+  }
+}

@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Capacitor } from "@capacitor/core";
-import { App as CapacitorApp } from "@capacitor/app";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -125,10 +123,6 @@ export default function VaultSettingsPage() {
   const [copiedGen, setCopiedGen] = useState(false);
   const [legacyCollections, setLegacyCollections] = useState<string[]>([]);
   const [cleaningLegacy, setCleaningLegacy] = useState(false);
-  const [platformInfo, setPlatformInfo] = useState<{
-    native: boolean;
-    version: string | null;
-  }>({ native: false, version: null });
 
   useEffect(() => {
     fetch("/api/health", { cache: "no-store" })
@@ -161,17 +155,6 @@ export default function VaultSettingsPage() {
       setCleaningLegacy(false);
     }
   }
-
-  useEffect(() => {
-    if (!Capacitor.isNativePlatform()) return;
-    void CapacitorApp.getInfo()
-      .then((info) => {
-        setPlatformInfo({ native: true, version: info.version || "1.0.0" });
-      })
-      .catch(() => {
-        setPlatformInfo({ native: true, version: "1.0.0" });
-      });
-  }, []);
 
   function regenerate(mode = genMode, len = genLength, sym = genSymbols) {
     setGenerated(
@@ -815,7 +798,7 @@ export default function VaultSettingsPage() {
               Lock Immediately When Switching Apps / Tabs
             </div>
             <p className="vault-text-muted mt-0.5 text-[11px]">
-              Locks your vault right away whenever you minimize the Android APK
+              Locks your vault right away whenever you minimize the app
               or switch browser tabs.
             </p>
           </div>
@@ -858,43 +841,6 @@ export default function VaultSettingsPage() {
               Clean
             </span>
           )}
-        </div>
-
-        {/* Android APK & Platform Card */}
-        <div className="vault-inset flex flex-col justify-between gap-3 rounded-2xl p-4 sm:flex-row sm:items-center">
-          <div className="flex items-start gap-3">
-            <Smartphone className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-            <div className="min-w-0">
-              <div className="vault-text-primary text-xs font-bold">
-                {platformInfo.native
-                  ? `SSE Vault Android App (v${platformInfo.version})`
-                  : "SSE Vault Android APK"}
-              </div>
-              <p className="vault-text-muted mt-0.5 text-[11px]">
-                {platformInfo.native
-                  ? "Running inside the native Android APK shell with auto-update checks."
-                  : "Download the latest signed Android APK release directly from GitHub."}
-              </p>
-            </div>
-          </div>
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
-            <Link
-              href="/apk"
-              className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-amber-500 px-3.5 py-2 text-xs font-extrabold text-zinc-950 hover:bg-amber-400"
-            >
-              <Download className="h-3.5 w-3.5" />
-              APK Page
-            </Link>
-            <a
-              href="https://github.com/sse-bots/sse-vault/releases/latest"
-              target="_blank"
-              rel="noreferrer"
-              className="vault-card vault-text-primary inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold hover:border-amber-500 hover:text-amber-500"
-            >
-              GitHub
-              <ExternalLink className="h-3 w-3" />
-            </a>
-          </div>
         </div>
 
         <div className="flex flex-wrap gap-2 pt-2">

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import {
+  MOBILE_APP_SCHEME,
   OAUTH_STATE_COOKIE,
   SESSION_COOKIE,
   decryptCookiePayload,
@@ -21,6 +22,7 @@ interface OAuthStatePayload {
   state: string;
   verifier: string;
   nextPath: string;
+  mobile?: boolean;
   redirectUri?: string;
   createdAt: number;
 }
@@ -162,6 +164,20 @@ export async function GET(req: Request) {
     !saved.nextPath.startsWith("//")
       ? saved.nextPath
       : "/vault";
+
+  if (saved.mobile) {
+    // Native app sign-in: hand the encrypted session to the app via deep link.
+    const token = encryptCookiePayload(sessionPayload);
+    const back = new Response(null, {
+      status: 302,
+      headers: {
+        Location: `${MOBILE_APP_SCHEME}://auth?token=${encodeURIComponent(token)}`,
+        "Cache-Control": "no-store",
+        "Set-Cookie": `${OAUTH_STATE_COOKIE}=; Path=/; Max-Age=0`,
+      },
+    });
+    return back;
+  }
 
   const res = NextResponse.redirect(new URL(target, appBase));
   res.cookies.delete(OAUTH_STATE_COOKIE);

@@ -9,6 +9,7 @@ import {
   clearPinUnlockCookie,
   getVaultPinStatus,
   hashVaultPin,
+  nativePinTokenFor,
   sanitizeAutoLockMinutes,
   verifyVaultPinHash,
 } from "@/lib/vault-pin";
@@ -130,7 +131,7 @@ export async function POST(req: Request) {
       { upsert: true }
     );
 
-    const res = NextResponse.json(
+    let res = NextResponse.json(
       {
         ok: true,
         pinStatus: {
@@ -143,6 +144,18 @@ export async function POST(req: Request) {
       },
       { headers: NO_CACHE }
     );
+    const nativeToken = await nativePinTokenFor({
+      userId: ctx.userId,
+      pinVersion: 1,
+      autoLockMinutes: autoLockMinutes,
+    });
+    const resJson = await res.clone().json();
+    const out = NextResponse.json(
+      nativeToken ? { ...resJson, pinToken: nativeToken } : resJson,
+      { headers: NO_CACHE }
+    );
+    res.cookies.getAll().forEach((c) => out.cookies.set(c));
+    res = out;
     applyPinUnlockCookie(res, {
       userId: ctx.userId,
       pinVersion: 1,
@@ -228,7 +241,7 @@ export async function POST(req: Request) {
       }
     );
 
-    const res = NextResponse.json(
+    let res = NextResponse.json(
       {
         ok: true,
         pinStatus: {
@@ -241,6 +254,18 @@ export async function POST(req: Request) {
       },
       { headers: NO_CACHE }
     );
+    const nativeToken = await nativePinTokenFor({
+      userId: ctx.userId,
+      pinVersion: pinVersion,
+      autoLockMinutes: autoLockMinutes,
+    });
+    const resJson = await res.clone().json();
+    const out = NextResponse.json(
+      nativeToken ? { ...resJson, pinToken: nativeToken } : resJson,
+      { headers: NO_CACHE }
+    );
+    res.cookies.getAll().forEach((c) => out.cookies.set(c));
+    res = out;
     applyPinUnlockCookie(res, {
       userId: ctx.userId,
       pinVersion,
@@ -292,7 +317,7 @@ export async function POST(req: Request) {
       }
     );
 
-    const res = NextResponse.json(
+    let res = NextResponse.json(
       {
         ok: true,
         pinStatus: {
@@ -305,6 +330,18 @@ export async function POST(req: Request) {
       },
       { headers: NO_CACHE }
     );
+    const nativeToken = await nativePinTokenFor({
+      userId: ctx.userId,
+      pinVersion: nextVersion,
+      autoLockMinutes: autoLockMinutes,
+    });
+    const resJson = await res.clone().json();
+    const out = NextResponse.json(
+      nativeToken ? { ...resJson, pinToken: nativeToken } : resJson,
+      { headers: NO_CACHE }
+    );
+    res.cookies.getAll().forEach((c) => out.cookies.set(c));
+    res = out;
     applyPinUnlockCookie(res, {
       userId: ctx.userId,
       pinVersion: nextVersion,
@@ -329,7 +366,7 @@ export async function POST(req: Request) {
       { $set: { autoLockMinutes: nextAutoLock, updatedAt: new Date() } }
     );
 
-    const res = NextResponse.json(
+    let res = NextResponse.json(
       {
         ok: true,
         pinStatus: {
@@ -339,6 +376,18 @@ export async function POST(req: Request) {
       },
       { headers: NO_CACHE }
     );
+    const nativeToken = await nativePinTokenFor({
+      userId: ctx.userId,
+      pinVersion: pinVersion,
+      autoLockMinutes: nextAutoLock,
+    });
+    const resJson = await res.clone().json();
+    const out = NextResponse.json(
+      nativeToken ? { ...resJson, pinToken: nativeToken } : resJson,
+      { headers: NO_CACHE }
+    );
+    res.cookies.getAll().forEach((c) => out.cookies.set(c));
+    res = out;
     applyPinUnlockCookie(res, {
       userId: ctx.userId,
       pinVersion,
