@@ -408,9 +408,17 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const openAddModal = useCallback(
-    (lockedDomain: string | null = null) => {
+    (
+      lockedDomain: string | null = null,
+      presetOAuthParent: VaultItemDTO | null = null
+    ) => {
       if (!isVaultUnlocked) return;
-      setModal({ open: true, editingItem: null, lockedDomain });
+      setModal({
+        open: true,
+        editingItem: null,
+        lockedDomain,
+        presetOAuthParent,
+      });
     },
     [isVaultUnlocked]
   );
@@ -418,13 +426,23 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   const openEditModal = useCallback(
     (item: VaultItemDTO, lockedDomain: string | null = null) => {
       if (!isVaultUnlocked) return;
-      setModal({ open: true, editingItem: item, lockedDomain });
+      setModal({
+        open: true,
+        editingItem: item,
+        lockedDomain,
+        presetOAuthParent: null,
+      });
     },
     [isVaultUnlocked]
   );
 
   const closeModal = useCallback(() => {
-    setModal({ open: false, editingItem: null, lockedDomain: null, presetOAuthParent: null });
+    setModal({
+      open: false,
+      editingItem: null,
+      lockedDomain: null,
+      presetOAuthParent: null,
+    });
   }, []);
 
   const openImportExportModal = useCallback(
