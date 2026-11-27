@@ -15,6 +15,6 @@
       "allowBackup": false,
       "permissions": ["USE_BIOMETRIC", "USE_FINGERPRINT"]
     },
-    "plugins": ["expo-secure-store", "expo-web-browser", "expo-local-authentication"]
+    "plugins": ["expo-secure-store", "expo-local-authentication"]
   }
 }
