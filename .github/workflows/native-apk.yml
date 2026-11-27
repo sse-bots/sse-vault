@@ -84,12 +84,14 @@ jobs:
                       keyAlias System.getenv("ANDROID_KEY_ALIAS")
                       keyPassword System.getenv("ANDROID_KEY_PASSWORD")
                   }
-                  defaultConfig {
-                      versionCode Integer.parseInt(System.getenv("VERSION_CODE"))
-                      versionName System.getenv("VERSION_NAME")
-                  }
-                  buildTypes {
-                      release { signingConfig signingConfigs.release }
+              }
+              defaultConfig {
+                  versionCode Integer.parseInt(System.getenv("VERSION_CODE"))
+                  versionName System.getenv("VERSION_NAME")
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.release
                   }
               }
           }
