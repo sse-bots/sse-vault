@@ -1,6 +1,6 @@
 {
   "name": "sse-vault-web",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -13,12 +13,10 @@
     "android": "cap run android"
   },
   "dependencies": {
-    "@better-auth/mongo-adapter": "^1.7.26",
     "@capacitor/app": "^7.0.1",
     "@capacitor/browser": "^7.0.1",
     "@capacitor/core": "^7.4.3",
     "@vercel/functions": "^3.10.5",
-    "better-auth": "^1.7.26",
     "lucide-react": "^0.511.0",
     "mongodb": "^6.16.0",
     "next": "^15.3.0",

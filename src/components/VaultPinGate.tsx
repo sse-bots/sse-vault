@@ -10,7 +10,6 @@ import {
   LogOut,
   ShieldCheck,
 } from "lucide-react";
-import { signOut } from "@/lib/auth-client";
 import { useVault } from "@/components/VaultContext";
 
 export function VaultPinGate() {
@@ -189,13 +188,10 @@ export function VaultPinGate() {
 
   async function handleSignOut() {
     try {
-      await fetch("/api/vault/pin", {
+      await fetch("/api/auth/logout", {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "lock" }),
       }).catch(() => {});
-      await signOut();
     } finally {
       clearUser();
       window.location.assign("/");

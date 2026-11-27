@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ArrowRight, KeyRound, Plus, Search, Smartphone, X } from "lucide-react";
 import { useVault } from "@/components/VaultContext";
 import { SiteIcon } from "@/components/SiteIcon";
+import { getAccountDetailHref } from "@/lib/oauth-links";
 
 export function SpotlightModal() {
   const router = useRouter();
@@ -45,10 +46,14 @@ export function SpotlightModal() {
 
   if (!spotlightOpen) return null;
 
-  function goToApp(domainKey: string) {
+  function goToPath(href: string) {
     setSpotlightOpen(false);
     setQuery("");
-    router.push(`/vault/${encodeURIComponent(domainKey)}`);
+    router.push(href);
+  }
+
+  function goToApp(domainKey: string) {
+    goToPath(`/vault/${encodeURIComponent(domainKey)}`);
   }
 
   return (
@@ -125,7 +130,7 @@ export function SpotlightModal() {
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => goToApp(item.domainKey)}
+                    onClick={() => goToPath(getAccountDetailHref(item))}
                     className="flex w-full items-center justify-between gap-3 rounded-2xl px-3 py-2.5 text-left transition hover:bg-amber-500/10"
                   >
                     <div className="flex min-w-0 items-center gap-3">

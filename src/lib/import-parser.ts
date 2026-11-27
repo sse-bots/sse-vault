@@ -6,6 +6,7 @@ export interface ParsedImportEntry {
   label: string;
   authType: VaultAuthType;
   oauthProvider: string;
+  oauthProviderDomain?: string;
   category: VaultCategory;
   hasPasskey: boolean;
   email: string;
@@ -164,6 +165,8 @@ function parseJsonImport(rawText: string): ImportParseResult {
         authType,
         oauthProvider:
           authType === "oauth" ? String(item.oauthProvider || "Google").trim() : "",
+        oauthProviderDomain:
+          authType === "oauth" ? String(item.oauthProviderDomain || "").trim().toLowerCase() : "",
         category: normalizeCategory(item.category),
         hasPasskey: Boolean(item.hasPasskey),
         email,

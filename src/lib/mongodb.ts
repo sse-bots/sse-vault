@@ -1,4 +1,4 @@
-import { MongoClient, MongoClientOptions, Db, Document, ObjectId } from "mongodb";
+import { MongoClient, MongoClientOptions, Db, Document } from "mongodb";
 import { attachDatabasePool } from "@vercel/functions";
 
 const uri = (process.env.MONGODB_URI || "mongodb://127.0.0.1:27017").trim();
@@ -46,45 +46,9 @@ export async function getMongoClient(): Promise<MongoClient> {
   return globalThis._sseVaultMongoConnectPromise;
 }
 
-export function getDbSync(): Db {
-  return mongoClient.db(dbName);
-}
-
 export async function getDb(): Promise<Db> {
   const client = await getMongoClient();
   return client.db(dbName);
-}
-
-export function userIdFilter(
-  ...rawIds: Array<string | ObjectId | null | undefined>
-): { $in: Array<string | ObjectId> } {
-  const seen = new Set<string>();
-  const values: Array<string | ObjectId> = [];
-  for (const raw of rawIds) {
-    if (!raw) continue;
-    const str =
-      typeof raw === "string"
-        ? raw.trim()
-        : typeof raw.toHexString === "function"
-          ? raw.toHexString()
-          : String(raw);
-    if (!str) continue;
-    if (!seen.has(`s:${str}`)) {
-      seen.add(`s:${str}`);
-      values.push(str);
-    }
-    if (ObjectId.isValid(str) && !seen.has(`o:${str}`)) {
-      seen.add(`o:${str}`);
-      values.push(new ObjectId(str));
-    }
-  }
-  return { $in: values };
-}
-
-export function userDocMatch(userId: string) {
-  return {
-    $or: [{ _id: userIdFilter(userId) }, { id: userId }],
-  };
 }
 
 export async function getVaultCollections() {
@@ -93,7 +57,5 @@ export async function getVaultCollections() {
     db,
     vaultItems: db.collection<Document>("vault_items"),
     vaultPinConfigs: db.collection<Document>("vault_pin_configs"),
-    authUsers: db.collection<Document>("user"),
-    authAccounts: db.collection<Document>("account"),
   };
 }

@@ -18,6 +18,7 @@ import {
   normalizeWebsiteUrl,
 } from "@/lib/domain";
 import { serializeVaultDoc } from "@/lib/vault-serializer";
+import { resolveOAuthProviderDomain } from "@/lib/oauth-links";
 import type { StoredSecurityCode } from "@/lib/vault-types";
 
 export const runtime = "nodejs";
@@ -29,6 +30,8 @@ const updateItemSchema = z.object({
   expectedDomain: z.string().trim().max(120).optional(),
   authType: z.enum(["password", "oauth"]).optional(),
   oauthProvider: z.string().trim().max(60).optional(),
+  oauthProviderDomain: z.string().trim().max(120).optional(),
+  oauthLinkedItemId: z.string().trim().max(64).optional(),
   category: z
     .enum(["personal", "work", "dev", "gaming", "finance", "social", "other"])
     .optional(),
@@ -120,11 +123,38 @@ export async function PATCH(
   const nextAuthType =
     d.authType ?? (existing.authType === "oauth" ? "oauth" : "password");
   if (d.authType !== undefined) updates.authType = nextAuthType;
-  if (d.oauthProvider !== undefined || d.authType !== undefined) {
-    updates.oauthProvider =
-      nextAuthType === "oauth"
-        ? (d.oauthProvider ?? String(existing.oauthProvider || "Google")).trim() || "Google"
-        : null;
+  if (
+    d.oauthProvider !== undefined ||
+    d.oauthProviderDomain !== undefined ||
+    d.oauthLinkedItemId !== undefined ||
+    d.authType !== undefined
+  ) {
+    if (nextAuthType === "oauth") {
+      const nextProv =
+        (d.oauthProvider ?? String(existing.oauthProvider || "Google")).trim() ||
+        "Google";
+      const rawDom =
+        d.oauthProviderDomain !== undefined
+          ? d.oauthProviderDomain.trim().toLowerCase()
+          : typeof existing.oauthProviderDomain === "string"
+            ? existing.oauthProviderDomain.trim().toLowerCase()
+            : "";
+      updates.oauthProvider = nextProv;
+      updates.oauthProviderDomain =
+        rawDom ||
+        resolveOAuthProviderDomain({
+          oauthProvider: nextProv,
+          oauthProviderDomain: null,
+        }) ||
+        null;
+      if (d.oauthLinkedItemId !== undefined) {
+        updates.oauthLinkedItemId = d.oauthLinkedItemId.trim() || null;
+      }
+    } else {
+      updates.oauthProvider = null;
+      updates.oauthProviderDomain = null;
+      updates.oauthLinkedItemId = null;
+    }
   }
   if (d.category !== undefined) updates.category = d.category;
   if (d.hasPasskey !== undefined) updates.hasPasskey = d.hasPasskey;

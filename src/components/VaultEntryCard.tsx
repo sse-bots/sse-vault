@@ -1,9 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
+  ArrowUpRight,
   Check,
   Copy,
   Edit3,
@@ -12,6 +13,7 @@ import {
   EyeOff,
   Fingerprint,
   KeyRound,
+  Link2,
   Loader2,
   Lock,
   Mail,
@@ -28,7 +30,12 @@ import { TotpLiveWidget } from "@/components/TotpLiveWidget";
 import { evaluatePasswordStrength } from "@/lib/domain";
 import { extractSecurityCodesFromText } from "@/lib/parse-codes";
 import {
-  OAUTH_PROVIDER_PRESETS,
+  findParentOAuthAccount,
+  getAccountDetailHref,
+  getConnectedOAuthEntries,
+  resolveOAuthProviderDomain,
+} from "@/lib/oauth-links";
+import {
   VAULT_CATEGORIES,
   type VaultItemDTO,
   type VaultSecurityCodeDTO,
@@ -37,11 +44,16 @@ import {
 export function VaultEntryCard({
   item,
   lockedDomain,
+  isDetailView = false,
+  onAfterDelete,
 }: {
   item: VaultItemDTO;
   lockedDomain?: string;
+  isDetailView?: boolean;
+  onAfterDelete?: () => void;
 }) {
   const {
+    items,
     privacyBlur,
     openEditModal,
     upsertItem,
@@ -67,10 +79,18 @@ export function VaultEntryCard({
   const categoryMeta =
     VAULT_CATEGORIES.find((c) => c.id === item.category) || VAULT_CATEGORIES[0];
 
+  const accountDetailHref = useMemo(() => getAccountDetailHref(item), [item]);
+  const parentOAuthAccount = useMemo(
+    () => findParentOAuthAccount(item, items),
+    [item, items]
+  );
+  const connectedOAuths = useMemo(
+    () => getConnectedOAuthEntries(item, items),
+    [item, items]
+  );
+
   const oauthDomain =
-    OAUTH_PROVIDER_PRESETS.find(
-      (p) => p.name.toLowerCase() === (item.oauthProvider || "").toLowerCase()
-    )?.domain || "";
+    parentOAuthAccount?.domainKey || resolveOAuthProviderDomain(item) || "";
 
   async function copyField(field: string, value: string, label: string) {
     await copySensitiveText(value, label);
@@ -111,6 +131,7 @@ export function VaultEntryCard({
       if (res.ok) {
         removeItem(item.id);
         showToast("Entry deleted from vault.");
+        onAfterDelete?.();
       }
     } finally {
       setDeleting(false);
@@ -197,7 +218,7 @@ export function VaultEntryCard({
   const primaryTitle =
     item.label !== item.appName
       ? item.label
-      : item.email || item.username || item.appName;
+      : item.username || item.email || item.appName;
 
   return (
     <article className="vault-card flex min-w-0 flex-col justify-between gap-4 overflow-hidden rounded-3xl p-4 sm:p-5">
@@ -206,9 +227,20 @@ export function VaultEntryCard({
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-1.5">
-              <h3 className="vault-text-primary truncate text-base font-extrabold">
-                {primaryTitle}
-              </h3>
+              {isDetailView ? (
+                <h2 className="vault-text-primary truncate text-base font-extrabold">
+                  {primaryTitle}
+                </h2>
+              ) : (
+                <Link
+                  href={accountDetailHref}
+                  className="vault-text-primary inline-flex max-w-full items-center gap-1 truncate text-base font-extrabold transition hover:text-amber-500"
+                >
+                  <span className="truncate">{primaryTitle}</span>
+                  <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                </Link>
+              )}
+
               <span
                 className="rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider"
                 style={{
@@ -275,7 +307,7 @@ export function VaultEntryCard({
           </div>
         </div>
 
-        {/* Conditional Key Recovery / Locked Alert (ONLY when secret changed!) */}
+        {/* Conditional Key Recovery / Locked Alert */}
         {item.decryptionStatus === "locked" && (
           <div className="flex items-start justify-between gap-2 rounded-2xl border border-rose-500/40 bg-rose-500/10 p-3 text-[11px] text-rose-400">
             <div className="flex min-w-0 items-start gap-2">
@@ -306,41 +338,77 @@ export function VaultEntryCard({
 
         {/* OAuth Login Block OR Standard Credentials Table */}
         {item.authType === "oauth" ? (
-          <div className="vault-inset flex items-center justify-between gap-2.5 rounded-2xl p-3">
-            <div className="flex min-w-0 items-center gap-3">
-              <SiteIcon
-                domainOrUrl={oauthDomain || item.oauthProvider || "google.com"}
-                label={item.oauthProvider || "OAuth"}
-                size="sm"
-              />
-              <div className="min-w-0">
-                <div className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-500">
-                  Sign in with {item.oauthProvider || "OAuth"}
-                </div>
-                <div
-                  className={`vault-text-primary truncate font-mono text-xs font-semibold ${
-                    privacyBlur ? "blur-sm select-none" : ""
-                  }`}
-                >
-                  {item.email || "No email saved"}
+          <div className="vault-inset space-y-2.5 rounded-2xl p-3">
+            <div className="flex items-center justify-between gap-2.5">
+              <div className="flex min-w-0 items-center gap-3">
+                <SiteIcon
+                  domainOrUrl={oauthDomain || item.oauthProvider || "google.com"}
+                  label={item.oauthProvider || "OAuth"}
+                  size="sm"
+                />
+                <div className="min-w-0">
+                  <div className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-500">
+                    Sign in with {item.oauthProvider || "OAuth"}
+                  </div>
+                  <div
+                    className={`vault-text-primary truncate font-mono text-xs font-semibold ${
+                      privacyBlur ? "blur-sm select-none" : ""
+                    }`}
+                  >
+                    {item.email || "No email saved"}
+                  </div>
                 </div>
               </div>
+
+              {item.email && (
+                <button
+                  type="button"
+                  onClick={() => copyField("email", item.email!, "OAuth email")}
+                  className="vault-card vault-text-muted shrink-0 rounded-xl p-2 hover:text-amber-500"
+                  title="Copy email"
+                >
+                  {copiedField === "email" ? (
+                    <Check className="h-3.5 w-3.5 text-emerald-500" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" />
+                  )}
+                </button>
+              )}
             </div>
 
-            {item.email && (
-              <button
-                type="button"
-                onClick={() => copyField("email", item.email!, "OAuth email")}
-                className="vault-card vault-text-muted shrink-0 rounded-xl p-2 hover:text-amber-500"
-                title="Copy email"
+            {parentOAuthAccount ? (
+              <Link
+                href={getAccountDetailHref(parentOAuthAccount)}
+                className="vault-card flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-[11px] font-bold transition hover:border-amber-500"
               >
-                {copiedField === "email" ? (
-                  <Check className="h-3.5 w-3.5 text-emerald-500" />
-                ) : (
-                  <Copy className="h-3.5 w-3.5" />
-                )}
-              </button>
-            )}
+                <span className="flex min-w-0 items-center gap-1.5 text-emerald-500">
+                  <Link2 className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">
+                    Open {parentOAuthAccount.appName} Account (
+                    {parentOAuthAccount.username ||
+                      parentOAuthAccount.email ||
+                      parentOAuthAccount.label}
+                    )
+                  </span>
+                </span>
+                <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+              </Link>
+            ) : oauthDomain ? (
+              <div className="flex items-center justify-between gap-2 pt-0.5 text-[10px]">
+                <span className="vault-text-muted">
+                  Not linked to a saved {item.oauthProvider || "provider"} card yet
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    openEditModal(item, lockedDomain || item.domainKey)
+                  }
+                  className="font-bold text-amber-500 hover:underline"
+                >
+                  Connect Account
+                </button>
+              </div>
+            ) : null}
           </div>
         ) : (
           (item.email || item.username || item.password) && (
@@ -480,7 +548,7 @@ export function VaultEntryCard({
           />
         )}
 
-        {/* Backup Security Keys (only full block if codes exist or quick import button) */}
+        {/* Backup Security Keys */}
         <div className="vault-inset space-y-2.5 rounded-2xl p-3 sm:p-3.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-1.5">
@@ -534,7 +602,6 @@ export function VaultEntryCard({
             </p>
           ) : (
             <>
-              {/* Remaining Keys Progress Bar + 1-Tap Copy Next Key */}
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex min-w-0 flex-1 items-center gap-2">
                   <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-500/20">
@@ -647,6 +714,41 @@ export function VaultEntryCard({
             </>
           )}
         </div>
+
+        {/* Connected OAuths Preview Footer (on /vault/[domain] cards) */}
+        {!isDetailView && (
+          <Link
+            href={`${accountDetailHref}#oauths`}
+            className="vault-inset flex items-center justify-between gap-2.5 rounded-2xl px-3.5 py-2.5 transition hover:border-amber-500/60"
+          >
+            <div className="flex min-w-0 items-center gap-2">
+              <Link2 className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+              <span className="vault-text-secondary truncate text-xs font-bold">
+                {connectedOAuths.length > 0
+                  ? `${connectedOAuths.length} Connected OAuth${connectedOAuths.length === 1 ? "" : "s"}`
+                  : "Open Account & OAuths"}
+              </span>
+            </div>
+
+            <div className="flex shrink-0 items-center gap-1.5">
+              {connectedOAuths.slice(0, 3).map((conn) => (
+                <SiteIcon
+                  key={conn.id}
+                  domainOrUrl={conn.domainKey}
+                  label={conn.appName}
+                  size="sm"
+                  className="!h-6 !w-6 !rounded-lg"
+                />
+              ))}
+              {connectedOAuths.length > 3 && (
+                <span className="vault-card vault-text-muted rounded-md px-1.5 py-0.5 font-mono text-[10px] font-bold">
+                  +{connectedOAuths.length - 3}
+                </span>
+              )}
+              <ArrowUpRight className="h-3.5 w-3.5 text-amber-500" />
+            </div>
+          </Link>
+        )}
 
         {item.notes && (
           <p

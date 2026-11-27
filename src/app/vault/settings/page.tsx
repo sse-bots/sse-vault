@@ -123,10 +123,44 @@ export default function VaultSettingsPage() {
     typeof window !== "undefined" ? buildRandomPassword(20, true) : ""
   );
   const [copiedGen, setCopiedGen] = useState(false);
+  const [legacyCollections, setLegacyCollections] = useState<string[]>([]);
+  const [cleaningLegacy, setCleaningLegacy] = useState(false);
   const [platformInfo, setPlatformInfo] = useState<{
     native: boolean;
     version: string | null;
   }>({ native: false, version: null });
+
+  useEffect(() => {
+    fetch("/api/health", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (Array.isArray(d?.legacyBetterAuthCollections)) {
+          setLegacyCollections(d.legacyBetterAuthCollections);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  async function handleCleanupLegacyDb() {
+    setCleaningLegacy(true);
+    try {
+      const res = await fetch("/api/vault/cleanup-legacy-auth", {
+        method: "POST",
+        credentials: "include",
+      });
+      const j = await res.json();
+      if (res.ok) {
+        setLegacyCollections(j.remainingLegacyCollections || []);
+        showToast(
+          j.droppedCollections?.length
+            ? `Deleted ${j.droppedCollections.length} legacy Better Auth collection(s)!`
+            : "Database is already clean."
+        );
+      }
+    } finally {
+      setCleaningLegacy(false);
+    }
+  }
 
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
@@ -792,6 +826,39 @@ export default function VaultSettingsPage() {
             className="h-4 w-4 shrink-0 accent-amber-500"
           />
         </label>
+
+
+        {/* Database Cleanup Status (Better Auth Removed) */}
+        <div className="vault-inset flex flex-col justify-between gap-3 rounded-2xl p-4 sm:flex-row sm:items-center">
+          <div className="min-w-0">
+            <div className="vault-text-primary text-xs font-bold">
+              {legacyCollections.length > 0
+                ? `Legacy Better Auth Collections Found (${legacyCollections.join(", ")})`
+                : "Stateless SSE SSO · Clean Vault Database"}
+            </div>
+            <p className="vault-text-muted mt-0.5 text-[11px]">
+              {legacyCollections.length > 0
+                ? "Migrate all existing vault records to your SSE Account ID and permanently drop unused Better Auth collections."
+                : "Better Auth collections removed — MongoDB stores only your encrypted vault_items and vault_pin_configs."}
+            </p>
+          </div>
+          {legacyCollections.length > 0 ? (
+            <button
+              type="button"
+              disabled={cleaningLegacy}
+              onClick={handleCleanupLegacyDb}
+              className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-rose-500 px-3.5 py-2 text-xs font-extrabold text-white hover:bg-rose-400 disabled:opacity-50"
+            >
+              {cleaningLegacy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              Delete Better Auth DB
+            </button>
+          ) : (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/15 px-3 py-1 text-[10px] font-bold text-emerald-500">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Clean
+            </span>
+          )}
+        </div>
 
         {/* Android APK & Platform Card */}
         <div className="vault-inset flex flex-col justify-between gap-3 rounded-2xl p-4 sm:flex-row sm:items-center">

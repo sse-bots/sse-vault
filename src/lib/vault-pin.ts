@@ -19,6 +19,7 @@ export interface VaultPinStatus {
 
 function getSigningSecret(): string {
   return (
+    process.env.SESSION_SECRET ||
     process.env.BETTER_AUTH_SECRET ||
     process.env.VAULT_ENCRYPTION_SECRET ||
     "dev-vault-pin-signing-fallback"
