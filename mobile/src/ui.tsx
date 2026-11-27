@@ -9,13 +9,31 @@ import { c, radius } from "./theme";
 
 export type IconName = React.ComponentProps<typeof Ionicons>["name"];
 
+// Styles are built per render so they always use the current theme colours.
+const S = () =>
+  StyleSheet.create({
+    btn: { height: 50, borderRadius: radius.md, flexDirection: "row", gap: 8,
+      alignItems: "center", justifyContent: "center", paddingHorizontal: 18 },
+    btnText: { fontSize: 16, fontWeight: "700" },
+    iconBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
+    label: { color: c.muted, fontSize: 12, fontWeight: "600", marginBottom: 6, letterSpacing: 0.4 },
+    input: { backgroundColor: c.card, borderColor: c.border, borderWidth: 1, borderRadius: radius.md,
+      color: c.text, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16 },
+    card: { backgroundColor: c.card, borderColor: c.border, borderWidth: 1, borderRadius: radius.lg, padding: 16 },
+    chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1,
+      borderColor: c.border, backgroundColor: c.card, marginRight: 8, marginBottom: 8 },
+    toast: { position: "absolute", bottom: 90, alignSelf: "center", backgroundColor: c.card2,
+      borderColor: c.border, borderWidth: 1, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 24 },
+  });
+
 export function Button({
   title, onPress, variant = "primary", icon, loading, disabled, style,
 }: {
   title: string; onPress: () => void; variant?: "primary" | "ghost" | "danger";
   icon?: IconName; loading?: boolean; disabled?: boolean; style?: ViewStyle;
 }) {
-  const bg = variant === "primary" ? c.accent : variant === "danger" ? "#2a1214" : c.card2;
+  const s = S();
+  const bg = variant === "primary" ? c.accent : variant === "danger" ? c.danger + "1f" : c.card2;
   const fg = variant === "primary" ? c.accentText : variant === "danger" ? c.danger : c.text;
   return (
     <Pressable
@@ -23,7 +41,8 @@ export function Button({
       disabled={disabled || loading}
       style={({ pressed }) => [
         s.btn, { backgroundColor: bg, opacity: disabled ? 0.5 : pressed ? 0.85 : 1 },
-        variant !== "primary" && { borderWidth: 1, borderColor: c.border }, style,
+        variant !== "primary" && { borderWidth: 1, borderColor: variant === "danger" ? c.danger + "55" : c.border },
+        style,
       ]}
     >
       {loading ? <ActivityIndicator color={fg} /> : (
@@ -36,18 +55,20 @@ export function Button({
   );
 }
 
-export function IconButton({ icon, onPress, color = c.text, size = 22, label }: {
+export function IconButton({ icon, onPress, color, size = 22, label }: {
   icon: IconName; onPress: () => void; color?: string; size?: number; label?: string;
 }) {
+  const s = S();
   return (
     <Pressable onPress={onPress} hitSlop={10} accessibilityLabel={label}
       style={({ pressed }) => [s.iconBtn, pressed && { backgroundColor: c.card2 }]}>
-      <Ionicons name={icon} size={size} color={color} />
+      <Ionicons name={icon} size={size} color={color || c.text} />
     </Pressable>
   );
 }
 
 export function Field({ label, ...p }: TextInputProps & { label: string }) {
+  const s = S();
   return (
     <View style={{ marginBottom: 14 }}>
       <Text style={s.label}>{label}</Text>
@@ -63,12 +84,13 @@ export function Field({ label, ...p }: TextInputProps & { label: string }) {
 }
 
 export function Card({ children, style }: { children: React.ReactNode; style?: ViewStyle }) {
-  return <View style={[s.card, style]}>{children}</View>;
+  return <View style={[S().card, style]}>{children}</View>;
 }
 
 export function Chip({ label, active, onPress, color }: {
   label: string; active?: boolean; onPress: () => void; color?: string;
 }) {
+  const s = S();
   return (
     <Pressable onPress={onPress}
       style={[s.chip, active && { backgroundColor: (color || c.accent) + "26", borderColor: color || c.accent }]}>
@@ -99,7 +121,7 @@ export function SiteIcon({ domain, name, size = 44 }: { domain: string; name: st
 export function Toast({ message }: { message: string | null }) {
   if (!message) return null;
   return (
-    <View pointerEvents="none" style={s.toast}>
+    <View pointerEvents="none" style={S().toast}>
       <Text style={{ color: c.text, fontWeight: "600" }}>{message}</Text>
     </View>
   );
@@ -135,17 +157,82 @@ export function Empty({ icon, title, body }: { icon: IconName; title: string; bo
   );
 }
 
-const s = StyleSheet.create({
-  btn: { height: 50, borderRadius: radius.md, flexDirection: "row", gap: 8,
-    alignItems: "center", justifyContent: "center", paddingHorizontal: 18 },
-  btnText: { fontSize: 16, fontWeight: "700" },
-  iconBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
-  label: { color: c.muted, fontSize: 12, fontWeight: "600", marginBottom: 6, letterSpacing: 0.4 },
-  input: { backgroundColor: c.card, borderColor: c.border, borderWidth: 1, borderRadius: radius.md,
-    color: c.text, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16 },
-  card: { backgroundColor: c.card, borderColor: c.border, borderWidth: 1, borderRadius: radius.lg, padding: 16 },
-  chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1,
-    borderColor: c.border, backgroundColor: c.card, marginRight: 8 },
-  toast: { position: "absolute", bottom: 90, alignSelf: "center", backgroundColor: c.card2,
-    borderColor: c.border, borderWidth: 1, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 24 },
-});
+export function SectionTitle({ children }: { children: string }) {
+  return (
+    <Text style={{ color: c.muted, fontSize: 12, fontWeight: "700", letterSpacing: 0.6,
+      marginTop: 24, marginBottom: 8 }}>{children.toUpperCase()}</Text>
+  );
+}
+
+/** A tappable settings line with an icon, title, optional subtitle and right-hand element. */
+export function SettingsRow({ icon, title, subtitle, right, onPress, danger, last }: {
+  icon: IconName; title: string; subtitle?: string; right?: React.ReactNode;
+  onPress?: () => void; danger?: boolean; last?: boolean;
+}) {
+  const color = danger ? c.danger : c.text;
+  return (
+    <Pressable disabled={!onPress} onPress={onPress}
+      style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", padding: 14, gap: 12,
+        backgroundColor: pressed ? c.card2 : "transparent",
+        borderBottomWidth: last ? 0 : 1, borderBottomColor: c.border })}>
+      <View style={{ width: 36, height: 36, borderRadius: 11, backgroundColor: (danger ? c.danger : c.accent) + "1f",
+        alignItems: "center", justifyContent: "center" }}>
+        <Ionicons name={icon} size={19} color={danger ? c.danger : c.accent} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={{ color, fontSize: 16, fontWeight: "600" }}>{title}</Text>
+        {subtitle ? <Text style={{ color: c.muted, fontSize: 13, marginTop: 2 }}>{subtitle}</Text> : null}
+      </View>
+      {right ?? (onPress ? <Ionicons name="chevron-forward" size={18} color={c.faint} /> : null)}
+    </Pressable>
+  );
+}
+
+export function Banner({ icon, color, title, body, action, onAction, onClose }: {
+  icon: IconName; color?: string; title: string; body?: string;
+  action?: string; onAction?: () => void; onClose?: () => void;
+}) {
+  const tint = color || c.accent;
+  return (
+    <View style={{ flexDirection: "row", gap: 12, padding: 14, borderRadius: radius.lg, marginBottom: 12,
+      backgroundColor: tint + "1a", borderWidth: 1, borderColor: tint + "55" }}>
+      <Ionicons name={icon} size={22} color={tint} style={{ marginTop: 1 }} />
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: c.text, fontWeight: "700", fontSize: 15 }}>{title}</Text>
+        {body ? <Text style={{ color: c.muted, fontSize: 13, marginTop: 2 }}>{body}</Text> : null}
+        {action ? (
+          <Pressable onPress={onAction} style={{ marginTop: 8, alignSelf: "flex-start" }}>
+            <Text style={{ color: tint, fontWeight: "800", fontSize: 14 }}>{action}</Text>
+          </Pressable>
+        ) : null}
+      </View>
+      {onClose ? <Ionicons name="close" size={20} color={c.faint} onPress={onClose} /> : null}
+    </View>
+  );
+}
+
+export function StatBox({ icon, label, value, color }: { icon: IconName; label: string; value: number | string; color: string }) {
+  return (
+    <View style={{ flex: 1, backgroundColor: c.card, borderColor: c.border, borderWidth: 1,
+      borderRadius: radius.md, padding: 12 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+        <Ionicons name={icon} size={13} color={color} />
+        <Text style={{ color, fontSize: 10, fontWeight: "800", letterSpacing: 0.5 }}>{label.toUpperCase()}</Text>
+      </View>
+      <Text style={{ color: c.text, fontSize: 22, fontWeight: "900", marginTop: 4 }}>{value}</Text>
+    </View>
+  );
+}
+
+export function StrengthMeter({ score, label, color }: { score: number; label: string; color: string }) {
+  return (
+    <View style={{ marginTop: -6, marginBottom: 12 }}>
+      <View style={{ flexDirection: "row", gap: 4 }}>
+        {[1, 2, 3, 4].map((i) => (
+          <View key={i} style={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: i <= score ? color : c.border }} />
+        ))}
+      </View>
+      <Text style={{ color, fontSize: 12, fontWeight: "700", marginTop: 4 }}>{label}</Text>
+    </View>
+  );
+}

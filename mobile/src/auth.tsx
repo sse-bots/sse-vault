@@ -5,6 +5,7 @@ import * as WebBrowser from "expo-web-browser";
 import * as LocalAuth from "expo-local-authentication";
 import { api, ApiError, setApiHandlers, tokens } from "./api";
 import { API_BASE, APP_SCHEME } from "./config";
+import { clearOffline, hasOffline, loadOffline, rememberPin, verifyOfflinePin } from "./offline";
 import type { PinStatus, VaultUser } from "./types";
 
 export type Phase = "loading" | "signedOut" | "pinSetup" | "locked" | "unlocked";
@@ -17,6 +18,8 @@ interface AuthCtx {
   phase: Phase;
   user: VaultUser | null;
   pinStatus: PinStatus | null;
+  /** True when running from the encrypted offline copy (read-only). */
+  offline: boolean;
   bioEnabled: boolean;
   bioAvailable: boolean;
   busy: boolean;
@@ -26,6 +29,8 @@ interface AuthCtx {
   setupPin: (pin: string, confirm: string) => Promise<boolean>;
   unlock: (pin: string) => Promise<boolean>;
   unlockWithBiometrics: () => Promise<boolean>;
+  changePin: (current: string, next: string, confirm: string) => Promise<boolean>;
+  reconnect: () => Promise<void>;
   lock: () => void;
   enableBiometrics: (pin: string) => Promise<boolean>;
   disableBiometrics: () => Promise<void>;
@@ -40,6 +45,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [user, setUser] = useState<VaultUser | null>(null);
   const [pinStatus, setPinStatus] = useState<PinStatus | null>(null);
+  const [offline, setOffline] = useState(false);
   const [bioEnabled, setBioEnabled] = useState(false);
   const [bioAvailable, setBioAvailable] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -57,7 +63,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     tokens.pin = null;
     setUser(null);
     setPinStatus(null);
+    setOffline(false);
     await SecureStore.deleteItemAsync(K_SESSION).catch(() => {});
+    await clearOffline();
     setPhase("signedOut");
   }, []);
 
@@ -68,12 +76,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await resetToSignedOut();
         return;
       }
+      setOffline(false);
       setUser(me.user);
       setPinStatus(me.pinStatus);
       autoLockRef.current = me.pinStatus?.autoLockMinutes ?? 30;
       setPhase(me.pinStatus?.hasPin ? "locked" : "pinSetup");
     } catch (e) {
-      // Network trouble: keep the session, let the user retry from the sign-in screen.
+      // No connection: fall back to the encrypted offline copy when one exists.
+      if (e instanceof ApiError && e.status === 0 && (await hasOffline())) {
+        const snap = await loadOffline();
+        if (snap) {
+          setUser(snap.user);
+          setPinStatus(snap.pinStatus);
+          setOffline(true);
+          setPhase("locked");
+          return;
+        }
+      }
       setError((e as Error).message);
       setPhase("signedOut");
     }
@@ -120,8 +139,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         `${APP_SCHEME}://auth`
       );
       if (result.type !== "success") return;
-      const url = result.url;
-      const m = url.match(/[?&]token=([^&#]+)/);
+      const m = result.url.match(/[?&]token=([^&#]+)/);
       if (!m) throw new Error("Sign-in did not return a session. Please try again.");
       const token = decodeURIComponent(m[1]);
       tokens.session = token;
@@ -135,7 +153,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
-    await api.logout();
+    if (!offline) await api.logout();
     await SecureStore.deleteItemAsync(K_BIO_PIN).catch(() => {});
     await SecureStore.deleteItemAsync(K_BIO_ON).catch(() => {});
     setBioEnabled(false);
@@ -143,7 +161,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const applyUnlock = (res: { pinStatus: PinStatus; pinToken?: string }) => {
-    if (!res.pinToken) throw new ApiError("Server did not return an unlock token. Deploy the latest vault backend.", 500, null);
+    if (!res.pinToken)
+      throw new ApiError("Server did not return an unlock token. Deploy the latest vault backend.", 500, null);
     tokens.pin = res.pinToken;
     setPinStatus(res.pinStatus);
     autoLockRef.current = res.pinStatus.autoLockMinutes;
@@ -166,13 +185,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const setupPin = (pin: string, confirm: string) =>
     run(async () => {
-      applyUnlock(await api.pin({ action: "setup", pin, confirmPin: confirm }));
+      const res = await api.pin({ action: "setup", pin, confirmPin: confirm });
+      await rememberPin(pin);
+      applyUnlock(res);
       return true;
     });
 
   const unlock = (pin: string) =>
     run(async () => {
-      applyUnlock(await api.pin({ action: "verify", pin }));
+      if (offline) {
+        const r = await verifyOfflinePin(pin);
+        if (r === "ok") {
+          tokens.pin = null;
+          setPhase("unlocked");
+          return true;
+        }
+        if (r === "wiped") {
+          setOffline(false);
+          setError("Too many wrong PINs. Offline data was erased — reconnect to unlock.");
+          await loadMe();
+          return false;
+        }
+        setError("Wrong PIN.");
+        return false;
+      }
+      const res = await api.pin({ action: "verify", pin });
+      await rememberPin(pin);
+      applyUnlock(res);
       return true;
     });
 
@@ -190,9 +229,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const changePin = (current: string, next: string, confirm: string) =>
+    run(async () => {
+      const res = await api.pin({ action: "change", currentPin: current, newPin: next, confirmPin: confirm });
+      if (res.pinToken) tokens.pin = res.pinToken;
+      setPinStatus(res.pinStatus);
+      await rememberPin(next);
+      if (bioEnabled) {
+        await SecureStore.setItemAsync(K_BIO_PIN, next, {
+          requireAuthentication: true,
+          authenticationPrompt: "Update biometric unlock",
+        }).catch(() => {});
+      }
+      return true;
+    });
+
+  const reconnect = async () => {
+    setBusy(true);
+    setError(null);
+    tokens.pin = null;
+    await loadMe();
+    setBusy(false);
+  };
+
   const enableBiometrics = (pin: string) =>
     run(async () => {
-      await api.pin({ action: "verify", pin }); // confirm the PIN is right before storing it
+      if (!offline) await api.pin({ action: "verify", pin }); // confirm the PIN before storing it
+      else if ((await verifyOfflinePin(pin)) !== "ok") throw new Error("Wrong PIN.");
       await SecureStore.setItemAsync(K_BIO_PIN, pin, {
         requireAuthentication: true,
         authenticationPrompt: "Enable biometric unlock",
@@ -222,8 +285,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   return (
     <Ctx.Provider
       value={{
-        phase, user, pinStatus, bioEnabled, bioAvailable, busy, error,
-        signIn, signOut, setupPin, unlock, unlockWithBiometrics, lock,
+        phase, user, pinStatus, offline, bioEnabled, bioAvailable, busy, error,
+        signIn, signOut, setupPin, unlock, unlockWithBiometrics, changePin, reconnect, lock,
         enableBiometrics, disableBiometrics, setAutoLock,
         clearError: () => setError(null),
       }}

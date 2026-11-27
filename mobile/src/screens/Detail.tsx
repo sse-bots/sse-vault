@@ -3,14 +3,16 @@ import { Alert, Linking, Pressable, ScrollView, Text, View } from "react-native"
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../api";
 import { useVault } from "../vault";
+import { useAuth } from "../auth";
 import { CATEGORIES } from "../types";
 import { formatCode, generateTotp, parseTotp, secondsLeft } from "../totp";
 import { Button, Card, IconButton, SiteIcon, Toast, copySecret, useToast } from "../ui";
 import { Countdown, useNow } from "./Authenticator";
 import { c, radius } from "../theme";
 
-export default function Detail({ id, onBack, onEdit }: { id: string; onBack: () => void; onEdit: () => void }) {
+export default function Detail({ id, onBack, onEdit, onOpen }: { id: string; onBack: () => void; onEdit: () => void; onOpen: (id: string) => void }) {
   const { items, refresh } = useVault();
+  const { offline } = useAuth();
   const item = items.find((i) => i.id === id);
   const toast = useToast();
   const now = useNow();
@@ -26,6 +28,8 @@ export default function Detail({ id, onBack, onEdit }: { id: string; onBack: () 
   }
 
   const totp = parseTotp(item.totpSecret);
+  const parent = item.oauthLinkedItemId ? items.find((i) => i.id === item.oauthLinkedItemId) : undefined;
+  const children = items.filter((i) => i.oauthLinkedItemId === item.id);
   const cat = CATEGORIES.find((k) => k.id === item.category);
   const copy = async (v: string | null, what: string) => {
     if (!v) return;
@@ -53,10 +57,14 @@ export default function Detail({ id, onBack, onEdit }: { id: string; onBack: () 
       <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 8 }}>
         <IconButton icon="chevron-back" onPress={onBack} label="Back" />
         <View style={{ flex: 1 }} />
-        <IconButton icon={item.favorite ? "star" : "star-outline"} color={item.favorite ? c.accent : c.text}
-          onPress={() => act(() => api.updateItem(item.id, { favorite: !item.favorite }))} />
-        <IconButton icon="create-outline" onPress={onEdit} label="Edit" />
-        <IconButton icon="trash-outline" color={c.danger} onPress={confirmDelete} label="Delete" />
+        {!offline && (
+          <>
+            <IconButton icon={item.favorite ? "star" : "star-outline"} color={item.favorite ? c.accent : c.text}
+              onPress={() => act(() => api.updateItem(item.id, { favorite: !item.favorite }))} />
+            <IconButton icon="create-outline" onPress={onEdit} label="Edit" />
+            <IconButton icon="trash-outline" color={c.danger} onPress={confirmDelete} label="Delete" />
+          </>
+        )}
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }}>
@@ -121,6 +129,7 @@ export default function Detail({ id, onBack, onEdit }: { id: string; onBack: () 
                   onPress={async () => {
                     if (k.locked) return;
                     if (!k.used && k.code) await copySecret(k.code);
+                    if (offline) return toast.show("Copied (read-only offline)");
                     await act(() => api.toggleCode(item.id, k.id, !k.used));
                   }}
                   style={{ paddingHorizontal: 12, paddingVertical: 9, borderRadius: radius.sm,
@@ -135,6 +144,19 @@ export default function Detail({ id, onBack, onEdit }: { id: string; onBack: () 
             <Text style={{ color: c.faint, fontSize: 12, marginTop: 10 }}>
               Tap a code to copy it and mark it used. Tap a used code to restore it.
             </Text>
+          </Card>
+        )}
+
+        {(parent || children.length > 0) && (
+          <Card style={{ marginTop: 12, padding: 0 }}>
+            {parent && (
+              <LinkRow label={`Signs in with ${item.oauthProvider || "OAuth"}`} title={parent.label}
+                sub={parent.email || parent.username || parent.domainKey} onPress={() => onOpen(parent.id)} last={children.length === 0} />
+            )}
+            {children.map((ch, n) => (
+              <LinkRow key={ch.id} label="Used to sign in to" title={ch.label}
+                sub={ch.domainKey} onPress={() => onOpen(ch.id)} last={n === children.length - 1} />
+            ))}
           </Card>
         )}
 
@@ -175,6 +197,20 @@ function Row({ label, value, onCopy, extra, mono, last }: {
       </View>
       {extra}
       {onCopy ? <Ionicons name="copy-outline" size={20} color={c.muted} style={{ marginLeft: 6 }} /> : null}
+    </Pressable>
+  );
+}
+
+function LinkRow({ label, title, sub, onPress, last }: { label: string; title: string; sub: string; onPress: () => void; last?: boolean }) {
+  return (
+    <Pressable onPress={onPress} style={{ flexDirection: "row", alignItems: "center", padding: 14,
+      borderBottomWidth: last ? 0 : 1, borderBottomColor: c.border }}>
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: c.muted, fontSize: 12, fontWeight: "600" }}>{label}</Text>
+        <Text style={{ color: c.text, fontSize: 16, fontWeight: "700", marginTop: 2 }}>{title}</Text>
+        <Text style={{ color: c.muted, fontSize: 13 }}>{sub}</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={c.faint} />
     </Pressable>
   );
 }
