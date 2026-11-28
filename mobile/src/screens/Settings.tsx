@@ -17,8 +17,8 @@ import { useVault } from "../vault";
 import { usePrefs } from "../prefs";
 import { c } from "../theme";
 import { clearOffline, isOfflineEnabled, setOfflineEnabled } from "../offline";
-import { checkForUpdate, currentVersion } from "../updates";
-import { openUpdate } from "../Update";
+import { currentVersion } from "../updates";
+import { useUpdater } from "../Update";
 import { ThemeCustomizerCard } from "../ThemeCustomizerCard";
 import {
   Button,
@@ -61,6 +61,7 @@ export default function Settings({ onImport, onTrash }: { onImport: () => void; 
   const { theme, setTheme, resetTheme, privacyBlur, setPrivacyBlur } =
     usePrefs();
   const { savedAt } = useVault();
+  const updater = useUpdater();
   const toast = useToast();
 
   const [bioModal, setBioModal] = useState(false);
@@ -153,18 +154,9 @@ export default function Settings({ onImport, onTrash }: { onImport: () => void; 
 
   const checkUpdates = async () => {
     setChecking(true);
-    const r = await checkForUpdate();
+    const r = await updater.checkNow(true);
     setChecking(false);
-    if (r.hasUpdate && r.latest) {
-      Alert.alert(
-        `Version ${r.latest.version} is available`,
-        "Download the new APK and tap it to install over the current app.",
-        [
-          { text: "Later", style: "cancel" },
-          { text: "Download", onPress: () => openUpdate(r.latest!) },
-        ]
-      );
-    } else {
+    if (!r.hasUpdate) {
       toast.show(r.latest ? "You're up to date" : "Couldn't check for updates");
     }
   };
@@ -398,13 +390,39 @@ export default function Settings({ onImport, onTrash }: { onImport: () => void; 
           )}
         </Card>
 
-        <SectionTitle>About</SectionTitle>
+        <SectionTitle>About &amp; Auto-Updates</SectionTitle>
         <Card style={{ padding: 0 }}>
+          <SettingsRow
+            icon="cloud-download-outline"
+            title="Auto-download updates on open"
+            subtitle="Automatically downloads new APK with a live progress bar on launch"
+            right={
+              <Switch
+                value={updater.autoDownloadOnOpen}
+                trackColor={{ true: c.accent, false: c.border }}
+                thumbColor="#fff"
+                onValueChange={(v) => {
+                  void updater.setAutoDownloadOnOpen(v);
+                  toast.show(v ? "Auto-download on open enabled" : "Manual update download enabled");
+                }}
+              />
+            }
+          />
           <SettingsRow
             icon="refresh-circle-outline"
             title="Check for updates"
-            subtitle={`Installed version ${currentVersion()}`}
-            onPress={checking ? undefined : checkUpdates}
+            subtitle={
+              updater.stage === "downloading"
+                ? `Downloading v${updater.latest?.version} · ${Math.round(updater.progress * 100)}%`
+                : `Installed version v${currentVersion()}`
+            }
+            onPress={
+              updater.stage === "downloading"
+                ? updater.openModal
+                : checking
+                  ? undefined
+                  : checkUpdates
+            }
           />
           <SettingsRow
             icon="globe-outline"
