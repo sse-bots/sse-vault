@@ -10,6 +10,7 @@ import {
   type OfflineQueuedOp,
 } from "./offline";
 import { extractDomainKey, getAppNameForDomain, normalizeWebsiteUrl } from "./lib/domain";
+import { clearPendingAutofillSaves, loadPendingAutofillSaves, syncVaultToAutofill, type PendingAutofillSave } from "./autofill";
 import type { ItemInput, VaultItem } from "./types";
 
 export interface AppGroup {
@@ -26,6 +27,8 @@ interface VaultCtx {
   pendingSyncCount: number;
   error: string | null;
   savedAt: number | null;
+  pendingAutofillSaves: PendingAutofillSave[];
+  dismissPendingAutofillSaves: () => Promise<void>;
   refresh: () => Promise<void>;
   syncQueue: () => Promise<void>;
   createItemSafe: (body: ItemInput) => Promise<VaultItem | null>;
@@ -56,11 +59,18 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [pendingAutofillSaves, setPendingAutofillSaves] = useState<PendingAutofillSave[]>([]);
+
+  const dismissPendingAutofillSaves = useCallback(async () => {
+    await clearPendingAutofillSaves();
+    setPendingAutofillSaves([]);
+  }, []);
 
   const persistLocalItems = useCallback(
     async (nextItems: VaultItem[]) => {
       setItems(nextItems);
       setSavedAt(Date.now());
+      void syncVaultToAutofill(nextItems).catch(() => {});
       await saveOffline({ items: nextItems, user, pinStatus }).catch(() => {});
     },
     [user, pinStatus]
@@ -117,7 +127,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
       if (offline) {
         const snap = await loadOffline();
-        setItems((snap?.items ?? []).map(normalizeVaultItem));
+        const normalized = (snap?.items ?? []).map(normalizeVaultItem);
+        setItems(normalized);
+        void syncVaultToAutofill(normalized).catch(() => {});
         setSavedAt(snap?.savedAt ?? null);
         if (!snap) setError("Offline copy is unavailable. Reconnect to load your vault.");
       } else {
@@ -125,7 +137,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         const fresh = (await api.items()).map(normalizeVaultItem);
         setItems(fresh);
         setSavedAt(Date.now());
+        void syncVaultToAutofill(fresh).catch(() => {});
         void saveOffline({ items: fresh, user, pinStatus }).catch(() => {});
+        void loadPendingAutofillSaves().then(setPendingAutofillSaves).catch(() => {});
       }
     } catch (e) {
       setError((e as Error).message);
@@ -325,6 +339,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         pendingSyncCount,
         error,
         savedAt,
+        pendingAutofillSaves,
+        dismissPendingAutofillSaves,
         refresh,
         syncQueue,
         createItemSafe,

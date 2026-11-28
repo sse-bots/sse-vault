@@ -29,6 +29,8 @@ type Overlay =
       kind: "form";
       id?: string;
       presetUrl?: string;
+      presetEmail?: string;
+      presetPassword?: string;
       lockedDomain?: string;
       presetParentId?: string;
       prev?: Overlay;
@@ -138,6 +140,8 @@ function Main() {
       <Form
         id={overlay.id}
         presetUrl={overlay.presetUrl}
+        presetEmail={overlay.presetEmail}
+        presetPassword={overlay.presetPassword}
         lockedDomain={overlay.lockedDomain}
         presetParentId={overlay.presetParentId}
         onClose={back}
@@ -169,6 +173,9 @@ function Main() {
               onSecurity={() => setTab("security")}
               onAuthTab={() => setTab("auth")}
               onTrash={() => setOverlay({ kind: "trash" })}
+              onSaveCaptured={(presetUrl, presetEmail, presetPassword) =>
+                setOverlay({ kind: "form", presetUrl, presetEmail, presetPassword })
+              }
             />
           )}
           {tab === "auth" && (

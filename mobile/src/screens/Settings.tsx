@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import {
   Alert,
+  AppState,
   Linking,
   Modal,
   ScrollView,
@@ -17,6 +18,7 @@ import { useVault } from "../vault";
 import { usePrefs } from "../prefs";
 import { c } from "../theme";
 import { clearOffline, isOfflineEnabled, setOfflineEnabled } from "../offline";
+import { getAutofillStatus, openAndroidAutofillSettings, setAutofillPrefs, syncVaultToAutofill, type AutofillStatus } from "../autofill";
 import { currentVersion } from "../updates";
 import { useUpdater } from "../Update";
 import { ThemeCustomizerCard } from "../ThemeCustomizerCard";
@@ -60,7 +62,7 @@ export default function Settings({ onImport, onTrash }: { onImport: () => void; 
   } = useAuth();
   const { theme, setTheme, resetTheme, privacyBlur, setPrivacyBlur } =
     usePrefs();
-  const { savedAt } = useVault();
+  const { items, savedAt } = useVault();
   const updater = useUpdater();
   const toast = useToast();
 
@@ -73,15 +75,32 @@ export default function Settings({ onImport, onTrash }: { onImport: () => void; 
   const [encPass, setEncPass] = useState("");
   const [encBusy, setEncBusy] = useState(false);
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
+  const [autofill, setAutofill] = useState<AutofillStatus>({
+    supported: false,
+    enabled: false,
+    syncEnabled: true,
+    requireAuth: true,
+    syncedCount: 0,
+  });
+
+  const refreshAutofillStatus = async () => {
+    const st = await getAutofillStatus();
+    setAutofill(st);
+  };
 
   useEffect(() => {
     void isOfflineEnabled().then(setOfflineOn);
+    void refreshAutofillStatus();
     if (!offline) {
       void api
         .activity()
         .then((list) => setActivity(Array.isArray(list) ? list : []))
         .catch(() => {});
     }
+    const sub = AppState.addEventListener("change", (s) => {
+      if (s === "active") void refreshAutofillStatus();
+    });
+    return () => sub.remove();
   }, [offline]);
 
   const doEncryptedExport = async () => {
@@ -204,6 +223,79 @@ export default function Settings({ onImport, onTrash }: { onImport: () => void; 
           onChange={setTheme}
           onReset={resetTheme}
         />
+
+        <SectionTitle>Android Autofill</SectionTitle>
+        <Card style={{ padding: 0 }}>
+          <SettingsRow
+            icon="sparkles-outline"
+            title="Android System Autofill"
+            subtitle={
+              !autofill.supported
+                ? "Requires Android 8.0+ native build"
+                : autofill.enabled
+                  ? `Active · ${autofill.syncedCount} login(s) ready in Chrome & apps`
+                  : "Tap to select SSE Vault as your Android autofill provider"
+            }
+            onPress={
+              autofill.supported
+                ? async () => {
+                    await openAndroidAutofillSettings();
+                  }
+                : undefined
+            }
+          />
+          {autofill.supported && (
+            <>
+              <SettingsRow
+                icon="sync-outline"
+                title="Sync logins to Autofill"
+                subtitle="Encrypts logins with Android KeyStore for instant autofill"
+                right={
+                  <Switch
+                    value={autofill.syncEnabled}
+                    trackColor={{ true: c.accent, false: c.border }}
+                    thumbColor="#fff"
+                    onValueChange={async (on) => {
+                      await setAutofillPrefs(on, autofill.requireAuth);
+                      if (on) await syncVaultToAutofill(items);
+                      await refreshAutofillStatus();
+                      toast.show(
+                        on ? "Logins synced to Android Autofill" : "Autofill data cleared"
+                      );
+                    }}
+                  />
+                }
+              />
+              <SettingsRow
+                icon="finger-print-outline"
+                title="Require Biometrics before filling"
+                subtitle="Prompt fingerprint / screen lock before filling passwords"
+                right={
+                  <Switch
+                    value={autofill.requireAuth}
+                    trackColor={{ true: c.accent, false: c.border }}
+                    thumbColor="#fff"
+                    onValueChange={async (on) => {
+                      await setAutofillPrefs(autofill.syncEnabled, on);
+                      await refreshAutofillStatus();
+                      toast.show(
+                        on
+                          ? "Biometric lock required for Autofill"
+                          : "Direct 1-tap Autofill enabled"
+                      );
+                    }}
+                  />
+                }
+                last
+              />
+            </>
+          )}
+        </Card>
+        {autofill.supported && (
+          <Text style={{ color: c.faint, fontSize: 11, marginTop: 6, lineHeight: 16 }}>
+            Chrome tip: Open Chrome → Settings → Autofill services → choose &ldquo;Autofill using another service&rdquo; for native website autofill.
+          </Text>
+        )}
 
         <SectionTitle>Security &amp; Privacy</SectionTitle>
         <Card style={{ padding: 0 }}>
