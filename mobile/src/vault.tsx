@@ -37,6 +37,17 @@ interface VaultCtx {
 const Ctx = createContext<VaultCtx>(null as unknown as VaultCtx);
 export const useVault = () => useContext(Ctx);
 
+function normalizeVaultItem(raw: VaultItem): VaultItem {
+  return {
+    ...raw,
+    entryType: raw.entryType === "note" || raw.entryType === "card" ? raw.entryType : "login",
+    securityCodes: Array.isArray(raw.securityCodes) ? raw.securityCodes : [],
+    customFields: Array.isArray(raw.customFields) ? raw.customFields : [],
+    passwordHistory: Array.isArray(raw.passwordHistory) ? raw.passwordHistory : [],
+    cardDetails: raw.cardDetails ?? null,
+  };
+}
+
 export function VaultProvider({ children }: { children: React.ReactNode }) {
   const { phase, offline, user, pinStatus } = useAuth();
   const [items, setItems] = useState<VaultItem[]>([]);
@@ -106,12 +117,12 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
       if (offline) {
         const snap = await loadOffline();
-        setItems(snap?.items ?? []);
+        setItems((snap?.items ?? []).map(normalizeVaultItem));
         setSavedAt(snap?.savedAt ?? null);
         if (!snap) setError("Offline copy is unavailable. Reconnect to load your vault.");
       } else {
         if (q.length > 0) await syncQueue();
-        const fresh = await api.items();
+        const fresh = (await api.items()).map(normalizeVaultItem);
         setItems(fresh);
         setSavedAt(Date.now());
         void saveOffline({ items: fresh, user, pinStatus }).catch(() => {});

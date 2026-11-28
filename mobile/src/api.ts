@@ -110,10 +110,14 @@ export const api = {
       compromised: Array<{ id: string; count: number }>;
       checkedAt: string;
     }>("/api/vault/breach-check", { method: "POST", body: "{}" }),
-  activity: async () =>
-    (await request<{ events: ActivityEvent[] }>("/api/vault/activity")).events,
-  trashList: async () =>
-    (await request<{ items: TrashedItem[] }>("/api/vault/trash")).items,
+  activity: async () => {
+    const res = await request<{ events?: ActivityEvent[] }>("/api/vault/activity");
+    return Array.isArray(res?.events) ? res.events : [];
+  },
+  trashList: async () => {
+    const res = await request<{ items?: TrashedItem[] }>("/api/vault/trash");
+    return Array.isArray(res?.items) ? res.items : [];
+  },
   trashAction: (body: { action: "restore" | "delete" | "empty"; id?: string }) =>
     request<any>("/api/vault/trash", { method: "POST", body: JSON.stringify(body) }),
   bulk: (body: { action: "trash"; ids: string[] } | { action: "category"; ids: string[]; category: Category }) =>
@@ -132,7 +136,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  items: async () => (await request<{ items: VaultItem[] }>("/api/vault")).items,
+  items: async () => {
+    const res = await request<{ items?: VaultItem[] }>("/api/vault");
+    return Array.isArray(res?.items) ? res.items : [];
+  },
   createItem: (body: ItemInput) =>
     request<{ ok: boolean; item?: VaultItem; addedToExistingGroup?: boolean }>("/api/vault", {
       method: "POST",
