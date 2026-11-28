@@ -60,19 +60,13 @@ export default function Import({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const changeStrategy = async (st: Strategy) => {
-    setStrategy(st);
-    if (!parsed) return;
-    try { setBusy(true); await preview(parsed, st); } catch (e) { Alert.alert("Error", (e as Error).message); } finally { setBusy(false); }
-  };
-
-  const previewEncrypted = async () => {
+  const previewEncrypted = async (st: Strategy = strategy) => {
     if (!encRaw || !passphrase.trim()) return;
     setBusy(true);
     try {
       const res = await api.importEntries({
         mode: "preview",
-        conflictStrategy: strategy,
+        conflictStrategy: st,
         encryptedBackup: encRaw,
         passphrase,
       });
@@ -82,6 +76,16 @@ export default function Import({ onClose }: { onClose: () => void }) {
     } finally {
       setBusy(false);
     }
+  };
+
+  const changeStrategy = async (st: Strategy) => {
+    setStrategy(st);
+    if (encRaw) {
+      await previewEncrypted(st);
+      return;
+    }
+    if (!parsed) return;
+    try { setBusy(true); await preview(parsed, st); } catch (e) { Alert.alert("Error", (e as Error).message); } finally { setBusy(false); }
   };
 
   const commit = async () => {
@@ -149,7 +153,7 @@ export default function Import({ onClose }: { onClose: () => void }) {
               placeholder="Enter passphrase..."
               secureTextEntry
             />
-            <Button title="Decrypt & Preview" icon="key-outline" loading={busy} onPress={previewEncrypted} />
+            <Button title="Decrypt & Preview" icon="key-outline" loading={busy} onPress={() => void previewEncrypted()} />
           </Card>
         )}
 
@@ -163,8 +167,8 @@ export default function Import({ onClose }: { onClose: () => void }) {
         {(parsed || encRaw) && summary && (
           <View style={{ marginTop: 16 }}>
             <Text style={{ color: c.muted, marginBottom: 8 }}>
-              {fileName} · detected {parsed ? parsed.detectedFormat : "SSE Vault Encrypted (.ssevault)"}
-              {parsed.skippedMalformed ? ` · ${parsed.skippedMalformed} malformed rows skipped` : ""}
+              {fileName || encName} · detected {parsed ? parsed.detectedFormat : "SSE Vault Encrypted (.ssevault)"}
+              {parsed?.skippedMalformed ? ` · ${parsed?.skippedMalformed} malformed rows skipped` : ""}
               {(parsed?.entries.length || 0) > 500 ? " · only the first 500 entries are imported at a time" : ""}
             </Text>
             <View style={{ flexDirection: "row", gap: 8 }}>
