@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import * as ScreenCapture from "expo-screen-capture";
 import { PrefsProvider, usePrefs } from "./src/prefs";
+import { UpdateModal, UpdateRunningBar, UpdaterProvider } from "./src/Update";
 import { AuthProvider, useAuth } from "./src/auth";
 import { VaultProvider, useVault } from "./src/vault";
 import { c } from "./src/theme";
@@ -293,7 +294,9 @@ function Shell() {
     <>
       <StatusBar style={c.isLight ? "dark" : "light"} />
       <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }}>
+        <UpdateRunningBar />
         <Root />
+        <UpdateModal />
       </SafeAreaView>
     </>
   );
@@ -308,7 +311,9 @@ export default function App() {
     <SafeAreaProvider>
       <PrefsProvider>
         <AuthProvider>
-          <Shell />
+          <UpdaterProvider>
+            <Shell />
+          </UpdaterProvider>
         </AuthProvider>
       </PrefsProvider>
     </SafeAreaProvider>

@@ -3,7 +3,7 @@
     "name": "SSE Vault",
     "slug": "sse-vault",
     "scheme": "ssevault",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "icon": "./assets/icon.png",
@@ -20,7 +20,12 @@
         "backgroundColor": "#09090b"
       },
       "allowBackup": false,
-      "permissions": ["USE_BIOMETRIC", "USE_FINGERPRINT", "CAMERA"]
+      "permissions": [
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT",
+        "CAMERA",
+        "REQUEST_INSTALL_PACKAGES"
+      ]
     },
     "plugins": [
       "expo-secure-store",
@@ -36,7 +41,8 @@
         {
           "photosPermission": "Allow SSE Vault to read a TOTP QR screenshot from your gallery."
         }
-      ]
+      ],
+      "./plugins/withSseUpdater"
     ]
   }
 }
