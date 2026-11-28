@@ -1,72 +1,368 @@
 import React, { useMemo, useState } from "react";
-import { FlatList, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
+import {
+  FlatList,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useVault, type AppGroup } from "../vault";
 import { useAuth } from "../auth";
+import { usePrefs } from "../prefs";
 import { CATEGORIES, type Category } from "../types";
 import { Banner, Chip, Empty, SiteIcon, StatBox } from "../ui";
 import { UpdateNotice } from "../Update";
 import { c, radius } from "../theme";
 
-export default function Home({ onOpen, onOpenGroup, onAdd, onSecurity }: {
-  onOpen: (id: string) => void; onOpenGroup: (domainKey: string) => void;
-  onAdd: () => void; onSecurity: () => void;
+type AppFilter = "all" | "oauth" | "totp" | "keys" | "favorites";
+type SortMode = "favorites" | "accounts" | "recent" | "az";
+
+const SORT_CYCLE: { id: SortMode; label: string }[] = [
+  { id: "favorites", label: "Sort: Favorites" },
+  { id: "accounts", label: "Sort: Most Accounts" },
+  { id: "recent", label: "Sort: Recent" },
+  { id: "az", label: "Sort: A–Z" },
+];
+
+export default function Home({
+  onOpenGroup,
+  onAdd,
+  onSecurity,
+  onAuthTab,
+}: {
+  onOpen: (id: string) => void;
+  onOpenGroup: (domainKey: string) => void;
+  onAdd: () => void;
+  onSecurity: () => void;
+  onAuthTab: () => void;
 }) {
   const { items, groups, loading, error, refresh } = useVault();
   const { user, offline } = useAuth();
+  const { privacyBlur, setPrivacyBlur } = usePrefs();
+
   const [q, setQ] = useState("");
-  const [cat, setCat] = useState<Category | "all" | "fav">("all");
+  const [filter, setFilter] = useState<AppFilter>("all");
+  const [cat, setCat] = useState<Category | "all">("all");
+  const [sortBy, setSortBy] = useState<SortMode>("favorites");
+  const [compact, setCompact] = useState(false);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return groups
-      .map((g) => ({
-        ...g,
-        items: g.items.filter((i) => {
-          if (cat === "fav" && !i.favorite) return false;
-          if (cat !== "all" && cat !== "fav" && i.category !== cat) return false;
-          if (!needle) return true;
-          return [i.label, i.appName, i.domainKey, i.email, i.username]
-            .some((v) => (v || "").toLowerCase().includes(needle));
-        }),
-      }))
-      .filter((g) => g.items.length > 0);
-  }, [groups, q, cat]);
+    const list = groups.filter((g) => {
+      const its = g.items;
+      if (filter === "oauth" && !its.some((i) => i.authType === "oauth"))
+        return false;
+      if (filter === "totp" && !its.some((i) => Boolean(i.totpSecret)))
+        return false;
+      if (filter === "keys" && !its.some((i) => i.securityCodes.length > 0))
+        return false;
+      if (filter === "favorites" && !its.some((i) => i.favorite)) return false;
+      if (cat !== "all" && !its.some((i) => i.category === cat)) return false;
+      if (!needle) return true;
+      return (
+        g.appName.toLowerCase().includes(needle) ||
+        g.domainKey.toLowerCase().includes(needle) ||
+        its.some((i) =>
+          [i.label, i.email, i.username, i.oauthProvider].some((v) =>
+            (v || "").toLowerCase().includes(needle)
+          )
+        )
+      );
+    });
 
-  const totp = items.filter((i) => i.totpSecret).length;
-  const favs = items.filter((i) => i.favorite).length;
+    return [...list].sort((a, b) => {
+      if (sortBy === "az") return a.appName.localeCompare(b.appName);
+      if (sortBy === "accounts")
+        return (
+          b.items.length - a.items.length ||
+          a.appName.localeCompare(b.appName)
+        );
+      if (sortBy === "recent") {
+        const aMax = a.items.reduce(
+          (m, i) => (i.updatedAt > m ? i.updatedAt : m),
+          ""
+        );
+        const bMax = b.items.reduce(
+          (m, i) => (i.updatedAt > m ? i.updatedAt : m),
+          ""
+        );
+        return bMax.localeCompare(aMax);
+      }
+      const aFav = a.items.some((i) => i.favorite) ? 1 : 0;
+      const bFav = b.items.some((i) => i.favorite) ? 1 : 0;
+      return (
+        bFav - aFav ||
+        b.items.length - a.items.length ||
+        a.appName.localeCompare(b.appName)
+      );
+    });
+  }, [groups, q, filter, cat, sortBy]);
+
+  const totpCount = items.filter((i) => Boolean(i.totpSecret)).length;
+  const unusedKeys = items.reduce(
+    (sum, i) => sum + i.securityCodes.filter((k) => !k.used).length,
+    0
+  );
   const problems = items.filter((i) => i.decryptionStatus !== "ok").length;
+
+  const currentSortLabel =
+    SORT_CYCLE.find((s) => s.id === sortBy)?.label || "Sort: Favorites";
+
+  const cycleSort = () => {
+    const idx = SORT_CYCLE.findIndex((s) => s.id === sortBy);
+    setSortBy(SORT_CYCLE[(idx + 1) % SORT_CYCLE.length].id);
+  };
 
   const header = (
     <View>
-      <Text style={{ color: c.muted, fontSize: 14 }}>Welcome back{user ? `, ${user.name.split(" ")[0]}` : ""}</Text>
-      <Text style={{ color: c.text, fontSize: 30, fontWeight: "900", marginBottom: 14 }}>My Vault</Text>
+      {/* Existing App Header — kept untouched! */}
+      <Text style={{ color: c.muted, fontSize: 14 }}>
+        Welcome back{user ? `, ${user.name.split(" ")[0]}` : ""}
+      </Text>
+      <Text
+        style={{
+          color: c.text,
+          fontSize: 30,
+          fontWeight: "900",
+          marginBottom: 14,
+        }}
+      >
+        My Vault
+      </Text>
+
       <UpdateNotice />
+
       {problems > 0 && !offline ? (
-        <Banner icon="warning-outline" color={c.danger} title={`${problems} entr${problems === 1 ? "y needs" : "ies need"} attention`}
-          body="Some data was recovered or couldn't be decrypted with the current key." action="Open Security check" onAction={onSecurity} />
+        <Banner
+          icon="warning-outline"
+          color={c.danger}
+          title={`${problems} entr${problems === 1 ? "y needs" : "ies need"} attention`}
+          body="Some data was recovered or couldn't be decrypted with the current key."
+          action="Open Security check"
+          onAction={onSecurity}
+        />
       ) : null}
-      <View style={{ flexDirection: "row", gap: 8, marginBottom: 14 }}>
-        <StatBox icon="key" label="Accounts" value={items.length} color={c.accent} />
-        <StatBox icon="timer-outline" label="2FA" value={totp} color={c.ok} />
-        <StatBox icon="star" label="Favorites" value={favs} color={c.info} />
+
+      {/* 2x2 Bento Stats Strip (Exact Website Match!) */}
+      <View style={{ gap: 8, marginBottom: 14 }}>
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <StatBox
+            icon="grid-outline"
+            label="Apps / Sites"
+            value={groups.length}
+            color={c.muted}
+          />
+          <StatBox
+            icon="people-outline"
+            label="Accounts"
+            value={items.length}
+            color={c.muted}
+          />
+        </View>
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <StatBox
+            icon="phone-portrait-outline"
+            label="Live TOTP"
+            value={totpCount}
+            color={c.info}
+            onPress={onAuthTab}
+          />
+          <StatBox
+            icon="key-outline"
+            label="Unused Keys"
+            value={unusedKeys}
+            color={c.accentLabel}
+            onPress={onSecurity}
+          />
+        </View>
       </View>
-      <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: c.card, borderRadius: radius.md,
-        borderWidth: 1, borderColor: c.border, paddingHorizontal: 12 }}>
-        <Ionicons name="search" size={18} color={c.faint} />
-        <TextInput value={q} onChangeText={setQ} placeholder={`Search ${groups.length} apps and ${items.length} accounts`}
-          placeholderTextColor={c.faint} autoCapitalize="none" autoCorrect={false}
-          style={{ flex: 1, color: c.text, paddingVertical: 12, paddingHorizontal: 8, fontSize: 15 }} />
-        {q ? <Ionicons name="close-circle" size={18} color={c.faint} onPress={() => setQ("")} /> : null}
+
+      {/* Search Bar + Privacy Blur Quick Toggle */}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <View
+          style={{
+            flex: 1,
+            flexDirection: "row",
+            alignItems: "center",
+            backgroundColor: c.card,
+            borderRadius: radius.lg,
+            borderWidth: 1,
+            borderColor: c.borderStrong,
+            paddingHorizontal: 12,
+          }}
+        >
+          <Ionicons name="search" size={17} color={c.faint} />
+          <TextInput
+            value={q}
+            onChangeText={setQ}
+            placeholder="Search apps (Google, GitHub...) or email..."
+            placeholderTextColor={c.faint}
+            autoCapitalize="none"
+            autoCorrect={false}
+            style={{
+              flex: 1,
+              color: c.text,
+              paddingVertical: 11,
+              paddingHorizontal: 8,
+              fontSize: 14,
+            }}
+          />
+          {q ? (
+            <Pressable onPress={() => setQ("")}>
+              <Ionicons name="close-circle" size={17} color={c.faint} />
+            </Pressable>
+          ) : null}
+        </View>
+
+        <Pressable
+          onPress={() => setPrivacyBlur(!privacyBlur)}
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: radius.md,
+            backgroundColor: privacyBlur ? c.accentSoft : c.card,
+            borderWidth: 1,
+            borderColor: privacyBlur ? c.accent : c.border,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Ionicons
+            name={privacyBlur ? "eye-outline" : "eye-off-outline"}
+            size={19}
+            color={privacyBlur ? c.accentLabel : c.muted}
+          />
+        </Pressable>
       </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: 12 }}>
-        <Chip label="All" active={cat === "all"} onPress={() => setCat("all")} />
-        <Chip label="★ Favorites" active={cat === "fav"} onPress={() => setCat("fav")} />
+
+      {/* Website-Matching Filter Pills + Sort + Compact Toggle */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={{ marginTop: 12 }}
+        contentContainerStyle={{ alignItems: "center", gap: 6, paddingRight: 8 }}
+      >
+        <View
+          style={{
+            flexDirection: "row",
+            backgroundColor: c.card2,
+            borderWidth: 1,
+            borderColor: c.border,
+            borderRadius: 999,
+            padding: 3,
+            gap: 2,
+          }}
+        >
+          {(
+            [
+              { id: "all", label: "All" },
+              { id: "oauth", label: "OAuth" },
+              { id: "totp", label: "TOTP" },
+              { id: "keys", label: "Keys" },
+              { id: "favorites", label: "Favorites" },
+            ] as const
+          ).map((t) => {
+            const active = filter === t.id;
+            return (
+              <Pressable
+                key={t.id}
+                onPress={() => setFilter(t.id)}
+                style={{
+                  paddingHorizontal: 11,
+                  paddingVertical: 5,
+                  borderRadius: 999,
+                  backgroundColor: active ? c.accent : "transparent",
+                }}
+              >
+                <Text
+                  style={{
+                    color: active ? c.accentText : c.muted,
+                    fontSize: 12,
+                    fontWeight: "800",
+                  }}
+                >
+                  {t.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <Pressable
+          onPress={cycleSort}
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 5,
+            backgroundColor: c.card,
+            borderWidth: 1,
+            borderColor: c.borderStrong,
+            borderRadius: 999,
+            paddingHorizontal: 11,
+            paddingVertical: 7,
+          }}
+        >
+          <Ionicons name="swap-vertical" size={13} color={c.accentLabel} />
+          <Text style={{ color: c.text, fontSize: 11, fontWeight: "700" }}>
+            {currentSortLabel}
+          </Text>
+        </Pressable>
+
+        <Pressable
+          onPress={() => setCompact((v) => !v)}
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 5,
+            backgroundColor: c.card,
+            borderWidth: 1,
+            borderColor: c.borderStrong,
+            borderRadius: 999,
+            paddingHorizontal: 11,
+            paddingVertical: 7,
+          }}
+        >
+          <Ionicons
+            name={compact ? "grid-outline" : "list-outline"}
+            size={13}
+            color={c.muted}
+          />
+          <Text style={{ color: c.muted, fontSize: 11, fontWeight: "700" }}>
+            {compact ? "Cards" : "Compact"}
+          </Text>
+        </Pressable>
+      </ScrollView>
+
+      {/* Category Filter Pills */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={{ marginTop: 8, marginBottom: 10 }}
+      >
+        <Chip
+          label="All Categories"
+          active={cat === "all"}
+          onPress={() => setCat("all")}
+        />
         {CATEGORIES.map((k) => (
-          <Chip key={k.id} label={k.label} color={k.color} active={cat === k.id} onPress={() => setCat(k.id)} />
+          <Chip
+            key={k.id}
+            label={k.label}
+            color={k.color}
+            active={cat === k.id}
+            onPress={() => setCat(k.id)}
+          />
         ))}
       </ScrollView>
-      {error ? <Text style={{ color: c.danger, textAlign: "center", padding: 8 }}>{error}</Text> : null}
+
+      {error ? (
+        <Text style={{ color: c.danger, textAlign: "center", padding: 8 }}>
+          {error}
+        </Text>
+      ) : null}
     </View>
   );
 
@@ -76,64 +372,316 @@ export default function Home({ onOpen, onOpenGroup, onAdd, onSecurity }: {
         data={filtered}
         keyExtractor={(g) => g.domainKey}
         ListHeaderComponent={header}
-        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 110 }}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={refresh} tintColor={c.accent} />}
-        ListEmptyComponent={loading ? null : (
-          <Empty icon="key-outline" title={items.length ? "No matches" : "Your vault is empty"}
-            body={items.length ? "Try a different search or filter." : "Tap + to add your first login."} />
-        )}
+        contentContainerStyle={{
+          paddingHorizontal: 16,
+          paddingTop: 8,
+          paddingBottom: 110,
+        }}
+        refreshControl={
+          <RefreshControl
+            refreshing={loading}
+            onRefresh={refresh}
+            tintColor={c.accent}
+          />
+        }
+        ListEmptyComponent={
+          loading ? null : (
+            <Empty
+              icon="shield-checkmark-outline"
+              title={
+                items.length
+                  ? "No matching apps found"
+                  : "Add your first app to SSE Vault"
+              }
+              body={
+                items.length
+                  ? "Try clearing your search or switching filter tabs."
+                  : "Tap + to add any website URL — SSE Vault fetches its icon and segregates accounts automatically."
+              }
+            />
+          )
+        }
         renderItem={({ item: g }) => (
-          <GroupRow group={g} onPress={() => (g.items.length === 1 ? onOpen(g.items[0].id) : onOpenGroup(g.domainKey))} />
+          <AppGroupCard
+            group={g}
+            compact={compact}
+            privacyBlur={privacyBlur}
+            onPress={() => onOpenGroup(g.domainKey)}
+          />
         )}
       />
+
       {!offline && (
-        <Pressable onPress={onAdd} style={({ pressed }) => ({ position: "absolute", right: 20, bottom: 24,
-          width: 60, height: 60, borderRadius: 20, backgroundColor: c.accent, alignItems: "center",
-          justifyContent: "center", opacity: pressed ? 0.85 : 1, elevation: 6 })}>
-          <Ionicons name="add" size={30} color={c.accentText} />
+        <Pressable
+          onPress={onAdd}
+          style={({ pressed }) => ({
+            position: "absolute",
+            right: 20,
+            bottom: 24,
+            width: 58,
+            height: 58,
+            borderRadius: radius.lg,
+            backgroundColor: c.accent,
+            alignItems: "center",
+            justifyContent: "center",
+            opacity: pressed ? 0.85 : 1,
+            elevation: 6,
+          })}
+        >
+          <Ionicons name="add" size={28} color={c.accentText} />
         </Pressable>
       )}
     </View>
   );
 }
 
-function GroupRow({ group, onPress }: { group: AppGroup; onPress: () => void }) {
+function AppGroupCard({
+  group,
+  compact,
+  privacyBlur,
+  onPress,
+}: {
+  group: AppGroup;
+  compact: boolean;
+  privacyBlur: boolean;
+  onPress: () => void;
+}) {
   const its = group.items;
-  const single = its.length === 1 ? its[0] : null;
-  const oauth = its.filter((i) => i.authType === "oauth").length;
-  const totp = its.filter((i) => i.totpSecret).length;
-  const codes = its.reduce((n, i) => n + i.securityCodes.filter((k) => !k.used).length, 0);
-  const fav = its.some((i) => i.favorite);
-  const bad = its.some((i) => i.decryptionStatus !== "ok");
-  const cat = CATEGORIES.find((k) => k.id === its[0].category);
-  const sub = single ? single.email || single.username || group.domainKey : `${its.length} accounts · ${group.domainKey}`;
-  return (
-    <Pressable onPress={onPress} style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 12,
-      padding: 12, marginBottom: 8, borderRadius: radius.lg, backgroundColor: pressed ? c.card2 : c.card,
-      borderWidth: 1, borderColor: c.border })}>
-      <SiteIcon domain={group.domainKey} name={group.appName} />
-      <View style={{ flex: 1 }}>
-        <Text numberOfLines={1} style={{ color: c.text, fontSize: 16, fontWeight: "700" }}>
-          {single ? single.label : group.appName}
-        </Text>
-        <Text numberOfLines={1} style={{ color: c.muted, fontSize: 13, marginTop: 2 }}>{sub}</Text>
-      </View>
-      <View style={{ alignItems: "flex-end", gap: 5 }}>
-        <View style={{ flexDirection: "row", gap: 6, alignItems: "center" }}>
-          {fav && <Ionicons name="star" size={14} color={c.accent} />}
-          {oauth > 0 && <Ionicons name="link" size={14} color={c.muted} />}
-          {totp > 0 && <Ionicons name="timer-outline" size={15} color={c.ok} />}
-          {codes > 0 && <Ionicons name="key-outline" size={14} color={c.muted} />}
-          {bad && <Ionicons name="warning" size={14} color={c.danger} />}
-        </View>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          {!single && (
-            <View style={{ backgroundColor: c.accent + "26", borderRadius: 10, paddingHorizontal: 7, paddingVertical: 1 }}>
-              <Text style={{ color: c.accent, fontSize: 12, fontWeight: "800" }}>{its.length}</Text>
+  const oauthCount = its.filter((i) => i.authType === "oauth").length;
+  const totpCount = its.filter((i) => Boolean(i.totpSecret)).length;
+  const unusedCodes = its.reduce(
+    (n, i) => n + i.securityCodes.filter((k) => !k.used).length,
+    0
+  );
+  const totalCodes = its.reduce((n, i) => n + i.securityCodes.length, 0);
+  const hasFav = its.some((i) => i.favorite);
+  const hasBad = its.some((i) => i.decryptionStatus !== "ok");
+  const identities = its
+    .map((i) => i.email || i.username || i.label)
+    .filter(Boolean)
+    .slice(0, 2);
+
+  if (compact) {
+    return (
+      <Pressable
+        onPress={onPress}
+        style={({ pressed }) => ({
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          paddingHorizontal: 13,
+          paddingVertical: 11,
+          marginBottom: 8,
+          borderRadius: radius.lg,
+          backgroundColor: pressed ? c.card2 : c.card,
+          borderWidth: 1,
+          borderColor: c.border,
+        })}
+      >
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 11, flex: 1 }}>
+          <SiteIcon domain={group.domainKey} name={group.appName} size={38} />
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+              <Text
+                numberOfLines={1}
+                style={{ color: c.text, fontSize: 15, fontWeight: "800" }}
+              >
+                {group.appName}
+              </Text>
+              {hasFav && <Ionicons name="star" size={13} color={c.accent} />}
+              {hasBad && <Ionicons name="warning" size={13} color={c.danger} />}
             </View>
-          )}
-          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: cat?.color || c.faint }} />
+            <Text
+              numberOfLines={1}
+              style={{ color: c.muted, fontSize: 11, fontFamily: "monospace" }}
+            >
+              {group.domainKey}
+            </Text>
+          </View>
         </View>
+
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <View
+            style={{
+              backgroundColor: c.card2,
+              borderRadius: 999,
+              paddingHorizontal: 8,
+              paddingVertical: 3,
+            }}
+          >
+            <Text style={{ color: c.text, fontSize: 10, fontWeight: "800" }}>
+              {its.length} {its.length === 1 ? "Acct" : "Accts"}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={c.faint} />
+        </View>
+      </Pressable>
+    );
+  }
+
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
+        backgroundColor: pressed ? c.card2 : c.card,
+        borderWidth: 1,
+        borderColor: c.border,
+        borderRadius: radius.xl,
+        padding: 15,
+        marginBottom: 10,
+        gap: 11,
+      })}
+    >
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: 10,
+        }}
+      >
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 12,
+            flex: 1,
+          }}
+        >
+          <SiteIcon domain={group.domainKey} name={group.appName} size={46} />
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+              <Text
+                numberOfLines={1}
+                style={{ color: c.text, fontSize: 16, fontWeight: "800" }}
+              >
+                {group.appName}
+              </Text>
+              {hasFav && <Ionicons name="star" size={14} color={c.accent} />}
+              {hasBad && <Ionicons name="warning" size={14} color={c.danger} />}
+            </View>
+            <Text
+              numberOfLines={1}
+              style={{
+                color: c.muted,
+                fontSize: 11,
+                fontFamily: "monospace",
+                marginTop: 2,
+              }}
+            >
+              {group.domainKey}
+            </Text>
+          </View>
+        </View>
+
+        <View
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: 15,
+            backgroundColor: c.card2,
+            borderWidth: 1,
+            borderColor: c.border,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Ionicons name="chevron-forward" size={15} color={c.muted} />
+        </View>
+      </View>
+
+      {identities.length > 0 && (
+        <Text
+          numberOfLines={1}
+          style={{ color: c.muted, fontSize: 11, fontFamily: "monospace" }}
+        >
+          {privacyBlur
+            ? "••••••••••"
+            : `${identities.join(" · ")}${its.length > 2 ? ` +${its.length - 2} more` : ""}`}
+        </Text>
+      )}
+
+      {/* Exact Website Footer Pills */}
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+        <View
+          style={{
+            backgroundColor: c.card2,
+            borderWidth: 1,
+            borderColor: c.border,
+            borderRadius: 999,
+            paddingHorizontal: 9,
+            paddingVertical: 3,
+          }}
+        >
+          <Text style={{ color: c.text, fontSize: 10, fontWeight: "800" }}>
+            {its.length} {its.length === 1 ? "Account" : "Accounts"}
+          </Text>
+        </View>
+
+        {oauthCount > 0 && (
+          <View
+            style={{
+              backgroundColor: "#8b5cf624",
+              borderRadius: 999,
+              paddingHorizontal: 9,
+              paddingVertical: 3,
+            }}
+          >
+            <Text style={{ color: "#a78bfa", fontSize: 10, fontWeight: "800" }}>
+              {oauthCount} OAuth
+            </Text>
+          </View>
+        )}
+
+        {totpCount > 0 && (
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 3,
+              backgroundColor: c.info + "24",
+              borderRadius: 999,
+              paddingHorizontal: 9,
+              paddingVertical: 3,
+            }}
+          >
+            <Ionicons name="phone-portrait-outline" size={10} color={c.info} />
+            <Text style={{ color: c.info, fontSize: 10, fontWeight: "800" }}>
+              {totpCount} TOTP
+            </Text>
+          </View>
+        )}
+
+        {totalCodes > 0 && (
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 3,
+              backgroundColor:
+                unusedCodes === 0 ? c.danger + "24" : c.accentSoft,
+              borderRadius: 999,
+              paddingHorizontal: 9,
+              paddingVertical: 3,
+            }}
+          >
+            <Ionicons
+              name="key-outline"
+              size={10}
+              color={unusedCodes === 0 ? c.danger : c.accentLabel}
+            />
+            <Text
+              style={{
+                color: unusedCodes === 0 ? c.danger : c.accentLabel,
+                fontSize: 10,
+                fontWeight: "800",
+              }}
+            >
+              {unusedCodes}/{totalCodes}
+            </Text>
+          </View>
+        )}
       </View>
     </Pressable>
   );

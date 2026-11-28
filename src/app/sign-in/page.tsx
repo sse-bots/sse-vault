@@ -1,16 +1,14 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  Download,
   ExternalLink,
   KeyRound,
   LogIn,
   ShieldAlert,
   ShieldCheck,
-  Smartphone,
 } from "lucide-react";
 import { useVault } from "@/components/VaultContext";
 

@@ -5,7 +5,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   CheckCircle2,
-  Download,
   ExternalLink,
   Eye,
   EyeOff,

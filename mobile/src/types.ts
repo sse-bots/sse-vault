@@ -1,5 +1,11 @@
 export type Category =
-  | "personal" | "work" | "dev" | "gaming" | "finance" | "social" | "other";
+  | "personal"
+  | "work"
+  | "dev"
+  | "gaming"
+  | "finance"
+  | "social"
+  | "other";
 
 export const CATEGORIES: { id: Category; label: string; color: string }[] = [
   { id: "personal", label: "Personal", color: "#f59e0b" },
@@ -9,6 +15,15 @@ export const CATEGORIES: { id: Category; label: string; color: string }[] = [
   { id: "social", label: "Social", color: "#ec4899" },
   { id: "finance", label: "Finance", color: "#10b981" },
   { id: "other", label: "Other", color: "#71717a" },
+];
+
+export const OAUTH_PROVIDER_PRESETS: Array<{ name: string; domain: string }> = [
+  { name: "Google", domain: "google.com" },
+  { name: "GitHub", domain: "github.com" },
+  { name: "Discord", domain: "discord.com" },
+  { name: "Microsoft", domain: "microsoft.com" },
+  { name: "Apple", domain: "apple.com" },
+  { name: "SSE Accounts", domain: "sse-account.vercel.app" },
 ];
 
 export interface SecurityCode {
@@ -40,7 +55,11 @@ export interface VaultItem {
   securityCodes: SecurityCode[];
   notes: string | null;
   favorite: boolean;
-  decryptionStatus: "ok" | "recovered_db_hex" | "recovered_legacy_env" | "locked";
+  decryptionStatus:
+    | "ok"
+    | "recovered_db_hex"
+    | "recovered_legacy_env"
+    | "locked";
   updatedAt: string;
 }
 
@@ -64,8 +83,11 @@ export interface VaultUser {
 export interface ItemInput {
   label?: string;
   url?: string;
+  expectedDomain?: string;
   authType?: "password" | "oauth";
   oauthProvider?: string;
+  oauthProviderDomain?: string;
+  oauthLinkedItemId?: string;
   category?: Category;
   hasPasskey?: boolean;
   email?: string;
@@ -74,5 +96,6 @@ export interface ItemInput {
   totpSecret?: string;
   notes?: string;
   favorite?: boolean;
+  securityCodesMode?: "keep" | "append" | "replace";
   securityCodes?: string[];
 }
