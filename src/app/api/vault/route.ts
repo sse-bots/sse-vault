@@ -10,6 +10,7 @@ import {
   shouldStoreHexcodeInDb,
 } from "@/lib/crypto";
 import {
+  detectVaultCategory,
   extractDomainKey,
   getAppNameForDomain,
   isUrlAllowedForDomain,
@@ -51,8 +52,8 @@ const createItemSchema = z.object({
   oauthLinkedItemId: z.string().trim().max(64).optional().default(""),
   category: z
     .enum(["personal", "work", "dev", "gaming", "finance", "social", "other"])
-    .optional()
-    .default("personal"),
+    .optional(),
+  categoryAuto: z.boolean().optional().default(false),
   hasPasskey: z.boolean().optional().default(false),
   email: z.string().trim().max(160).optional().default(""),
   username: z.string().trim().max(120).optional().default(""),
@@ -77,19 +78,64 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const domainFilter = (searchParams.get("domain") || "").trim().toLowerCase();
 
-  const { vaultItems } = await getVaultCollections();
+  const { vaultItems, vaultPinConfigs } = await getVaultCollections();
   const cutoff = new Date(Date.now() - TRASH_TTL_MS);
   await vaultItems
     .deleteMany({ ownerUserId: ctx.userId, deletedAt: { $lte: cutoff } })
     .catch(() => {});
 
-  const docs = await vaultItems
+  let docs = await vaultItems
     .find({
       ownerUserId: ctx.userId,
       $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
     })
     .sort({ favorite: -1, updatedAt: -1 })
     .toArray();
+
+  // Auto-segregate all existing registered data once (non-destructive: upgrades default personal/other items)
+  try {
+    const pinCfg = await vaultPinConfigs.findOne({ ownerUserId: ctx.userId });
+    if (pinCfg && Number(pinCfg.autoCategorizedVersion || 0) < 1) {
+      let changedAny = false;
+      for (const doc of docs) {
+        const curCat = String(doc.category || "personal");
+        if (curCat !== "personal" && curCat !== "other") continue;
+        const et =
+          doc.entryType === "note" || doc.entryType === "card"
+            ? doc.entryType
+            : "login";
+        const detected = detectVaultCategory(
+          String(doc.domainKey || doc.url || ""),
+          typeof doc.appName === "string" ? doc.appName : "",
+          typeof doc.label === "string" ? doc.label : "",
+          et
+        );
+        if (detected !== curCat) {
+          await vaultItems.updateOne(
+            { _id: doc._id },
+            { $set: { category: detected } }
+          );
+          doc.category = detected;
+          changedAny = true;
+        }
+      }
+      await vaultPinConfigs.updateOne(
+        { ownerUserId: ctx.userId },
+        { $set: { autoCategorizedVersion: 1 } }
+      );
+      if (changedAny) {
+        docs = await vaultItems
+          .find({
+            ownerUserId: ctx.userId,
+            $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+          })
+          .sort({ favorite: -1, updatedAt: -1 })
+          .toArray();
+      }
+    }
+  } catch {
+    /* non-fatal */
+  }
 
   let items = docs.map(serializeVaultDoc);
   if (domainFilter) {
@@ -222,7 +268,10 @@ export async function POST(req: Request) {
       isOAuth && d.oauthLinkedItemId.trim()
         ? d.oauthLinkedItemId.trim()
         : null,
-    category: d.category,
+    category:
+      !d.category || d.categoryAuto
+        ? detectVaultCategory(domainKey, appName, d.label, entryType)
+        : d.category,
     hasPasskey: entryType === "login" ? d.hasPasskey : false,
     email: d.email.trim() || null,
     username: isOAuth || entryType !== "login" ? null : d.username.trim() || null,

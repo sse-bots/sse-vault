@@ -11,6 +11,7 @@ import {
   shouldStoreHexcodeInDb,
 } from "@/lib/crypto";
 import {
+  detectVaultCategory,
   extractDomainKey,
   getAppNameForDomain,
   normalizeWebsiteUrl,
@@ -444,7 +445,10 @@ export async function POST(req: Request) {
           ? (d.oauthProviderDomain.trim().toLowerCase() || resolveOAuthProviderDomain({ oauthProvider: d.oauthProvider.trim() || "Google", oauthProviderDomain: null }) || null)
           : null,
       oauthLinkedItemId: null,
-      category: d.category,
+      category:
+        d.category === "personal" || d.category === "other"
+          ? detectVaultCategory(row.domainKey, row.appName, d.label, d.entryType)
+          : d.category,
       hasPasskey: Boolean(d.hasPasskey),
       email: d.email.trim() || null,
       username: d.authType === "oauth" ? null : d.username.trim() || null,

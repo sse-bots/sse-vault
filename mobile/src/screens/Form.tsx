@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -35,6 +35,7 @@ import {
   StrengthMeter,
 } from "../ui";
 import {
+  detectVaultCategory,
   evaluatePasswordStrength,
   extractDomainKey,
   getAppNameForDomain,
@@ -134,8 +135,10 @@ export default function Form({
   );
   const [label, setLabel] = useState(existing?.label || "");
   const [category, setCategory] = useState<Category>(
-    existing?.category || "personal"
+    existing?.category ||
+      (lockedDomain ? detectVaultCategory(lockedDomain) : "personal")
   );
+  const [categoryManuallyPicked, setCategoryManuallyPicked] = useState(isEdit);
 
   // Login Method: Password Login vs OAuth / Connect
   const [authType, setAuthType] = useState<"password" | "oauth">(
@@ -201,6 +204,12 @@ export default function Form({
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (categoryManuallyPicked) return;
+    if (!url.trim() && entryType === "login") return;
+    setCategory(detectVaultCategory(url, undefined, label, entryType));
+  }, [url, label, entryType, categoryManuallyPicked]);
 
   const detectedDomain = useMemo(() => extractDomainKey(url), [url]);
   const detectedAppName = useMemo(
@@ -2111,7 +2120,7 @@ export default function Form({
               label={k.label}
               color={k.color}
               active={category === k.id}
-              onPress={() => setCategory(k.id)}
+              onPress={() => { setCategory(k.id); setCategoryManuallyPicked(true); }}
             />
           ))}
         </View>

@@ -1,13 +1,21 @@
 import crypto from "crypto";
 import { cookies, headers } from "next/headers";
 import { NextResponse } from "next/server";
+import { getSession } from "./auth";
 import { getVaultCollections } from "./mongodb";
 import { getVaultSession, type VaultUserSession } from "./session";
 
 export const PIN_COOKIE_NAME = "sse_vault_pin_unlock";
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_MS = 2 * 60 * 1000; // 2 minutes after 5 wrong PINs
-const ALLOWED_AUTOLOCK = new Set([0, 5, 15, 30, 60]);
+const RESET_WINDOW_MS = 15 * 60 * 1000; // 15 minutes after SSE Accounts re-auth
+const ALLOWED_AUTOLOCK = new Set([0, 1, 5, 15, 30, 60]);
+
+export interface StoredSecurityQuestion {
+  question: string;
+  answerHash: string;
+  answerSalt: string;
+}
 
 export interface VaultPinStatus {
   hasPin: boolean;
@@ -17,6 +25,9 @@ export interface VaultPinStatus {
   lockedUntil: string | null;
   hasWebAuthn?: boolean;
   webAuthnCount?: number;
+  hasSecurityQuestions?: boolean;
+  securityQuestions?: string[];
+  canResetPin?: boolean;
 }
 
 function getSigningSecret(): string {
@@ -63,13 +74,40 @@ export function verifyVaultPinHash(
   }
 }
 
+/**
+ * Normalizes a security question answer so comparison is strictly
+ * case-insensitive and ignores leading/trailing or repeated spaces.
+ */
+export function normalizeSecurityAnswer(answer: string): string {
+  return (answer || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+export function hashSecurityAnswer(answer: string): {
+  answerHash: string;
+  answerSalt: string;
+} {
+  const normalized = normalizeSecurityAnswer(answer);
+  const { hash, salt } = hashVaultPin(normalized);
+  return { answerHash: hash, answerSalt: salt };
+}
+
+export function verifySecurityAnswer(
+  answer: string,
+  expectedHash: string,
+  salt: string
+): boolean {
+  const normalized = normalizeSecurityAnswer(answer);
+  if (!normalized) return false;
+  return verifyVaultPinHash(normalized, expectedHash, salt);
+}
+
 export function signPinUnlockToken(params: {
   userId: string;
   pinVersion: number;
   autoLockMinutes: number;
 }): { token: string; maxAgeSeconds?: number } {
   const ttlMinutes =
-    params.autoLockMinutes > 0 ? params.autoLockMinutes : 60 * 12; // 12h cap for session cookies
+    params.autoLockMinutes > 0 ? params.autoLockMinutes : 60 * 12;
   const exp = Date.now() + ttlMinutes * 60 * 1000;
 
   const payload = Buffer.from(
@@ -154,7 +192,7 @@ export function clearPinUnlockCookie(res: NextResponse) {
 export function sanitizeAutoLockMinutes(val: unknown): number {
   const num = Number(val);
   if (Number.isFinite(num) && ALLOWED_AUTOLOCK.has(num)) return num;
-  return 30;
+  return 1;
 }
 
 export async function getVaultPinStatus(
@@ -163,18 +201,27 @@ export async function getVaultPinStatus(
   const { vaultPinConfigs } = await getVaultCollections();
   const doc = await vaultPinConfigs.findOne({ ownerUserId: userId });
 
+  const rawSess = await getSession().catch(() => null);
+  const canResetPin = Boolean(
+    rawSess?.pinResetFreshAt &&
+      Date.now() - rawSess.pinResetFreshAt <= RESET_WINDOW_MS
+  );
+
   if (!doc || !doc.pinHash || !doc.pinSalt) {
     return {
       hasPin: false,
       unlocked: false,
-      autoLockMinutes: 30,
+      autoLockMinutes: 1,
       failedAttempts: 0,
       lockedUntil: null,
+      hasSecurityQuestions: false,
+      securityQuestions: [],
+      canResetPin,
     };
   }
 
   const pinVersion = Number(doc.pinVersion || 1);
-  const autoLockMinutes = sanitizeAutoLockMinutes(doc.autoLockMinutes ?? 30);
+  const autoLockMinutes = sanitizeAutoLockMinutes(doc.autoLockMinutes ?? 1);
   const failedAttempts = Number(doc.failedAttempts || 0);
   const lockedUntilDate = doc.lockedUntil
     ? new Date(doc.lockedUntil as string | Date)
@@ -197,15 +244,27 @@ export async function getVaultPinStatus(
   const creds = Array.isArray(doc.webauthnCredentials)
     ? doc.webauthnCredentials
     : [];
+  const rawQuestions: StoredSecurityQuestion[] = Array.isArray(
+    doc.securityQuestions
+  )
+    ? (doc.securityQuestions as StoredSecurityQuestion[])
+    : [];
+  const questionTexts = rawQuestions
+    .map((q) => String(q?.question || "").trim())
+    .filter(Boolean);
 
   return {
     hasPin: true,
     unlocked,
     autoLockMinutes,
     failedAttempts,
-    lockedUntil: isCooldown && lockedUntilDate ? lockedUntilDate.toISOString() : null,
+    lockedUntil:
+      isCooldown && lockedUntilDate ? lockedUntilDate.toISOString() : null,
     hasWebAuthn: creds.length > 0,
     webAuthnCount: creds.length,
+    hasSecurityQuestions: questionTexts.length >= 2,
+    securityQuestions: questionTexts,
+    canResetPin,
   };
 }
 
@@ -245,12 +304,8 @@ export async function requireUnlockedVaultSession(): Promise<
   return { ok: true, session };
 }
 
-export { MAX_FAILED_ATTEMPTS, LOCKOUT_MS };
+export { MAX_FAILED_ATTEMPTS, LOCKOUT_MS, RESET_WINDOW_MS };
 
-/**
- * For the native app only (header `x-sse-client: native`): returns the signed
- * unlock token so the app can keep it in secure storage instead of a cookie.
- */
 export async function nativePinTokenFor(params: {
   userId: string;
   pinVersion: number;

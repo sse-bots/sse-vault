@@ -45,9 +45,6 @@ export async function GET(req: Request) {
   authUrl.searchParams.set("state", state);
   authUrl.searchParams.set("code_challenge", challenge);
   authUrl.searchParams.set("code_challenge_method", "S256");
-  if (pinReset) {
-    authUrl.searchParams.set("prompt", "login");
-  }
 
   const payload = encryptCookiePayload({
     state,

@@ -3,7 +3,7 @@
     "name": "SSE Vault",
     "slug": "sse-vault",
     "scheme": "ssevault",
-    "version": "1.3.0",
+    "version": "2.2.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "icon": "./assets/icon.png",

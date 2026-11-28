@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Check,
@@ -37,6 +37,7 @@ import { useVault } from "@/components/VaultContext";
 import { SiteIcon } from "@/components/SiteIcon";
 import { TotpLiveWidget } from "@/components/TotpLiveWidget";
 import {
+  detectVaultCategory,
   evaluatePasswordStrength,
   extractDomainKey,
   getAppNameForDomain,
@@ -122,8 +123,10 @@ export function VaultItemModal() {
   );
   const [label, setLabel] = useState(initialItem?.label || "");
   const [category, setCategory] = useState<VaultCategory>(
-    initialItem?.category || "personal"
+    initialItem?.category ||
+      (lockedDomain ? detectVaultCategory(lockedDomain) : "personal")
   );
+  const [categoryManuallyPicked, setCategoryManuallyPicked] = useState(isEdit);
 
   // Standard Password vs OAuth (Connected Account or Email Only)
   const [authType, setAuthType] = useState<VaultAuthType>(
@@ -191,6 +194,12 @@ export function VaultItemModal() {
   const [error, setError] = useState<string | null>(null);
 
   const detectedDomain = useMemo(() => extractDomainKey(url), [url]);
+  useEffect(() => {
+    if (categoryManuallyPicked) return;
+    if (!url.trim() && entryType === "login") return;
+    setCategory(detectVaultCategory(url, undefined, label, entryType));
+  }, [url, label, entryType, categoryManuallyPicked]);
+
   const detectedAppName = useMemo(
     () => (detectedDomain ? getAppNameForDomain(detectedDomain) : ""),
     [detectedDomain]
@@ -1632,7 +1641,7 @@ export function VaultItemModal() {
                     <button
                       key={cat.id}
                       type="button"
-                      onClick={() => setCategory(cat.id)}
+                      onClick={() => { setCategory(cat.id); setCategoryManuallyPicked(true); }}
                       className={`rounded-full border px-3 py-1 text-[11px] font-bold transition ${
                         active
                           ? "border-amber-500 bg-amber-500/15 text-amber-500"

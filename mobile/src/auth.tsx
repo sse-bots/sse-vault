@@ -33,6 +33,14 @@ interface AuthCtx {
   changePin: (current: string, next: string, confirm: string) => Promise<boolean>;
   startPinReset: () => Promise<void>;
   resetPin: (next: string, confirm: string) => Promise<boolean>;
+  setSecurityQuestions: (
+    questions: Array<{ question: string; answer: string }>
+  ) => Promise<boolean>;
+  resetPinWithQuestions: (
+    answers: string[],
+    newPin: string,
+    confirmPin: string
+  ) => Promise<boolean>;
   reconnect: () => Promise<void>;
   lock: () => void;
   enableBiometrics: (pin: string) => Promise<boolean>;
@@ -83,8 +91,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setOffline(false);
       setUser(me.user);
       setPinStatus(me.pinStatus);
-      autoLockRef.current = me.pinStatus?.autoLockMinutes ?? 30;
-      setPhase(me.pinStatus?.hasPin ? "locked" : "pinSetup");
+      autoLockRef.current = me.pinStatus?.autoLockMinutes ?? 1;
+      setPhase(me.pinStatus?.canResetPin ? "pinReset" : me.pinStatus?.hasPin ? "locked" : "pinSetup");
     } catch (e) {
       // No connection: fall back to the encrypted offline copy when one exists.
       if (e instanceof ApiError && e.status === 0 && (await hasOffline())) {
@@ -176,6 +184,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(me.user);
         setPinStatus(me.pinStatus);
         setPhase("pinReset");
+      } else {
+        throw new Error("Could not verify your SSE Account session. Please try again.");
       }
     } catch (e) {
       setError((e as Error).message);
@@ -190,6 +200,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await rememberPin(next);
       if (bioEnabled) {
         await SecureStore.setItemAsync(K_BIO_PIN, next, {
+          requireAuthentication: true,
+          authenticationPrompt: "Update biometric unlock",
+        }).catch(() => {});
+      }
+      applyUnlock(res);
+      return true;
+    });
+
+  const setSecurityQuestions = (
+    questions: Array<{ question: string; answer: string }>
+  ) =>
+    run(async () => {
+      const res = await api.pin({
+        action: "set_security_questions",
+        questions,
+      });
+      if (res.pinStatus) setPinStatus(res.pinStatus);
+      return true;
+    });
+
+  const resetPinWithQuestions = (
+    answers: string[],
+    newPin: string,
+    confirmPin: string
+  ) =>
+    run(async () => {
+      const res = await api.pin({
+        action: "reset_via_questions",
+        answers,
+        newPin,
+        confirmPin,
+      });
+      await rememberPin(newPin);
+      if (bioEnabled) {
+        await SecureStore.setItemAsync(K_BIO_PIN, newPin, {
           requireAuthentication: true,
           authenticationPrompt: "Update biometric unlock",
         }).catch(() => {});
@@ -332,7 +377,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     <Ctx.Provider
       value={{
         phase, user, pinStatus, offline, bioEnabled, bioAvailable, busy, error,
-        signIn, signOut, setupPin, unlock, unlockWithBiometrics, changePin, startPinReset, resetPin, reconnect, lock,
+        signIn, signOut, setupPin, unlock, unlockWithBiometrics, changePin, startPinReset, resetPin, setSecurityQuestions, resetPinWithQuestions, reconnect, lock,
         enableBiometrics, disableBiometrics, setAutoLock,
         clearError: () => setError(null),
       }}

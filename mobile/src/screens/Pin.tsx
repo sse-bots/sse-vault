@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../auth";
-import { Button } from "../ui";
-import { c } from "../theme";
+import { Button, Card, Field, IconButton } from "../ui";
+import { c, radius } from "../theme";
 
 export function PinPad({
   value,
@@ -113,9 +113,11 @@ function Key({
 export default function PinScreen() {
   const {
     phase,
+    pinStatus,
     setupPin,
     resetPin,
     startPinReset,
+    resetPinWithQuestions,
     unlock,
     unlockWithBiometrics,
     bioEnabled,
@@ -133,6 +135,23 @@ export default function PinScreen() {
   const [pin, setPin] = useState("");
   const [first, setFirst] = useState<string | null>(null);
   const [localErr, setLocalErr] = useState<string | null>(null);
+
+  // Forgot PIN Modal state
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const savedQuestions = pinStatus?.securityQuestions || [];
+  const hasQuestions = Boolean(
+    pinStatus?.hasSecurityQuestions && savedQuestions.length >= 2
+  );
+  const [answers, setAnswers] = useState<string[]>(["", ""]);
+  const [sqNewPin, setSqNewPin] = useState("");
+  const [sqConfirmPin, setSqConfirmPin] = useState("");
+  const [forgotErr, setForgotErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (savedQuestions.length > 0 && answers.length !== savedQuestions.length) {
+      setAnswers(savedQuestions.map(() => ""));
+    }
+  }, [savedQuestions.length, answers.length]);
 
   useEffect(() => {
     if (phase === "locked" && bioEnabled) void unlockWithBiometrics();
@@ -156,7 +175,9 @@ export default function PinScreen() {
         setPin("");
         return;
       }
-      const ok = isReset ? await resetPin(first, next) : await setupPin(first, next);
+      const ok = isReset
+        ? await resetPin(first, next)
+        : await setupPin(first, next);
       if (!ok) {
         setFirst(null);
         setPin("");
@@ -164,6 +185,25 @@ export default function PinScreen() {
     } else {
       const ok = await unlock(next);
       if (!ok) setPin("");
+    }
+  };
+
+  const handleQuestionsReset = async () => {
+    setForgotErr(null);
+    if (answers.some((a) => !a.trim())) {
+      setForgotErr("Please answer all security questions.");
+      return;
+    }
+    if (!/^\d{6}$/.test(sqNewPin) || sqNewPin !== sqConfirmPin) {
+      setForgotErr("Enter and confirm a matching 6-digit new PIN.");
+      return;
+    }
+    const ok = await resetPinWithQuestions(answers, sqNewPin, sqConfirmPin);
+    if (ok) {
+      setForgotOpen(false);
+      setSqNewPin("");
+      setSqConfirmPin("");
+      setAnswers(savedQuestions.map(() => ""));
     }
   };
 
@@ -177,7 +217,7 @@ export default function PinScreen() {
         : "Create a Vault PIN"
       : "Enter Vault PIN";
   const sub = isReset
-    ? "SSE Accounts verified. Set your new 6-digit PIN."
+    ? "Verification succeeded. Set your new 6-digit PIN."
     : isSetup
       ? first
         ? "Enter the same 6 digits again."
@@ -216,7 +256,9 @@ export default function PinScreen() {
         value={pin}
         onChange={busy ? () => {} : onChange}
         onBio={
-          !isCreating && bioEnabled ? () => void unlockWithBiometrics() : undefined
+          !isCreating && bioEnabled
+            ? () => void unlockWithBiometrics()
+            : undefined
         }
       />
 
@@ -232,7 +274,11 @@ export default function PinScreen() {
           <Button
             title="Forgot PIN?"
             variant="ghost"
-            onPress={() => void startPinReset()}
+            onPress={() => {
+              setForgotErr(null);
+              clearError();
+              setForgotOpen(true);
+            }}
             loading={busy}
             style={{ height: 42, paddingHorizontal: 16 }}
           />
@@ -244,6 +290,169 @@ export default function PinScreen() {
           style={{ height: 42, paddingHorizontal: 18 }}
         />
       </View>
+
+      {/* Forgot PIN Recovery Modal (Case-Insensitive Security Questions + SSE Accounts Fallback) */}
+      <Modal
+        visible={forgotOpen}
+        animationType="slide"
+        onRequestClose={() => setForgotOpen(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: c.bg, paddingTop: 44 }}>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              paddingHorizontal: 8,
+              paddingBottom: 8,
+              borderBottomWidth: 1,
+              borderBottomColor: c.border,
+            }}
+          >
+            <IconButton
+              icon="close"
+              onPress={() => setForgotOpen(false)}
+              label="Close"
+            />
+            <Text
+              style={{
+                color: c.text,
+                fontSize: 17,
+                fontWeight: "800",
+                flex: 1,
+                textAlign: "center",
+              }}
+            >
+              Reset Vault PIN
+            </Text>
+            <View style={{ width: 40 }} />
+          </View>
+
+          <ScrollView
+            contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 48 }}
+            keyboardShouldPersistTaps="handled"
+          >
+            {forgotErr || error ? (
+              <View
+                style={{
+                  backgroundColor: c.danger + "1a",
+                  borderWidth: 1,
+                  borderColor: c.danger + "55",
+                  borderRadius: radius.md,
+                  padding: 12,
+                }}
+              >
+                <Text style={{ color: c.danger, fontSize: 12, fontWeight: "700" }}>
+                  {forgotErr || error}
+                </Text>
+              </View>
+            ) : null}
+
+            {hasQuestions ? (
+              <Card style={{ gap: 10 }}>
+                <Text style={{ color: c.text, fontSize: 15, fontWeight: "800" }}>
+                  Answer Your Security Questions
+                </Text>
+                <View
+                  style={{
+                    backgroundColor: c.accentSoft,
+                    borderWidth: 1,
+                    borderColor: c.accentBorder,
+                    borderRadius: radius.md,
+                    padding: 10,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: c.accentLabel,
+                      fontSize: 12,
+                      fontWeight: "800",
+                    }}
+                  >
+                    Note: Fields are NOT case-sensitive (uppercase and lowercase
+                    letters are treated the same).
+                  </Text>
+                </View>
+
+                {savedQuestions.map((q, idx) => (
+                  <Field
+                    key={idx}
+                    label={`${idx + 1}. ${q}`}
+                    value={answers[idx] || ""}
+                    onChangeText={(v) =>
+                      setAnswers((prev) =>
+                        prev.map((a, i) => (i === idx ? v : a))
+                      )
+                    }
+                    placeholder="Your answer (not case-sensitive)"
+                  />
+                ))}
+
+                <View style={{ flexDirection: "row", gap: 10 }}>
+                  <View style={{ flex: 1 }}>
+                    <Field
+                      label="NEW 6-DIGIT PIN"
+                      value={sqNewPin}
+                      onChangeText={(v) =>
+                        setSqNewPin(v.replace(/\D/g, "").slice(0, 6))
+                      }
+                      keyboardType="number-pad"
+                      maxLength={6}
+                      secureTextEntry
+                      placeholder="••••••"
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Field
+                      label="CONFIRM PIN"
+                      value={sqConfirmPin}
+                      onChangeText={(v) =>
+                        setSqConfirmPin(v.replace(/\D/g, "").slice(0, 6))
+                      }
+                      keyboardType="number-pad"
+                      maxLength={6}
+                      secureTextEntry
+                      placeholder="••••••"
+                    />
+                  </View>
+                </View>
+
+                <Button
+                  title="Verify Answers & Reset PIN"
+                  icon="shield-checkmark-outline"
+                  loading={busy}
+                  onPress={() => void handleQuestionsReset()}
+                />
+              </Card>
+            ) : (
+              <Card style={{ gap: 8 }}>
+                <Text style={{ color: c.text, fontSize: 15, fontWeight: "800" }}>
+                  No Security Questions Set Yet
+                </Text>
+                <Text style={{ color: c.muted, fontSize: 12, lineHeight: 18 }}>
+                  Verify with SSE Accounts below to reset your PIN, then set up
+                  case-insensitive Security Questions in Settings → Security &amp;
+                  Privacy for instant recovery anytime.
+                </Text>
+              </Card>
+            )}
+
+            <Button
+              title={
+                hasQuestions
+                  ? "Or Verify via SSE Accounts"
+                  : "Verify via SSE Accounts & Reset PIN"
+              }
+              icon="refresh-outline"
+              variant="ghost"
+              loading={busy}
+              onPress={async () => {
+                setForgotOpen(false);
+                await startPinReset();
+              }}
+            />
+          </ScrollView>
+        </View>
+      </Modal>
     </View>
   );
 }

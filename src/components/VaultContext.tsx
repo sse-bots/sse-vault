@@ -35,6 +35,9 @@ export interface ClientPinStatus {
   lockedUntil: string | null;
   hasWebAuthn?: boolean;
   webAuthnCount?: number;
+  hasSecurityQuestions?: boolean;
+  securityQuestions?: string[];
+  canResetPin?: boolean;
 }
 
 interface ModalRequest {

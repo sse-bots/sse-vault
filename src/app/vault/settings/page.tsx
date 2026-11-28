@@ -9,6 +9,8 @@ import {
   CheckCircle2,
   ExternalLink,
   Fingerprint,
+  HelpCircle,
+  Wand2,
   Smartphone,
   Trash2,
   Copy,
@@ -29,6 +31,7 @@ import {
 import { useVault } from "@/components/VaultContext";
 import { isPlatformBiometricsSupported, registerWebBiometricPasskey } from "@/lib/webauthn-client";
 import type { VaultActivityDTO } from "@/lib/vault-types";
+import { DEFAULT_SECURITY_QUESTIONS } from "@/lib/domain";
 
 const PASSPHRASE_WORDS = [
   "amber",
@@ -132,6 +135,81 @@ export default function VaultSettingsPage() {
   const [webBioCount, setWebBioCount] = useState(0);
   const [webBioBusy, setWebBioBusy] = useState(false);
   const [activityEvents, setActivityEvents] = useState<VaultActivityDTO[]>([]);
+  const [sq1, setSq1] = useState(DEFAULT_SECURITY_QUESTIONS[0]);
+  const [sq2, setSq2] = useState(DEFAULT_SECURITY_QUESTIONS[1]);
+  const [ans1, setAns1] = useState("");
+  const [ans2, setAns2] = useState("");
+  const [sqSaving, setSqSaving] = useState(false);
+  const [sqMsg, setSqMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [autoCatBusy, setAutoCatBusy] = useState(false);
+
+  useEffect(() => {
+    if (pinStatus?.securityQuestions && pinStatus.securityQuestions.length >= 2) {
+      setSq1(pinStatus.securityQuestions[0]);
+      setSq2(pinStatus.securityQuestions[1]);
+    }
+  }, [pinStatus?.securityQuestions]);
+
+  async function handleSaveSecurityQuestions(e: React.FormEvent) {
+    e.preventDefault();
+    setSqMsg(null);
+    if (!sq1.trim() || !sq2.trim() || ans1.trim().length < 2 || ans2.trim().length < 2) {
+      setSqMsg({ type: "err", text: "Enter both security questions and answers (min 2 chars each)." });
+      return;
+    }
+    setSqSaving(true);
+    try {
+      const res = await fetch("/api/vault/pin", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "set_security_questions",
+          questions: [
+            { question: sq1.trim(), answer: ans1.trim() },
+            { question: sq2.trim(), answer: ans2.trim() },
+          ],
+        }),
+      });
+      const j = await res.json();
+      if (!res.ok) {
+        setSqMsg({ type: "err", text: j.error || "Could not save security questions." });
+        return;
+      }
+      if (j.pinStatus) setPinStatus(j.pinStatus);
+      setAns1("");
+      setAns2("");
+      setSqMsg({ type: "ok", text: "Security questions saved! Answers are stored hashed and are NOT case-sensitive." });
+      showToast("PIN recovery security questions updated!");
+    } catch {
+      setSqMsg({ type: "err", text: "Network error while saving security questions." });
+    } finally {
+      setSqSaving(false);
+    }
+  }
+
+  async function handleAutoCategorizeAll() {
+    setAutoCatBusy(true);
+    try {
+      const res = await fetch("/api/vault/auto-categorize", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ forceAll: true }),
+      });
+      const j = await res.json();
+      if (res.ok) {
+        await refreshVault();
+        showToast(
+          j.updatedCount > 0
+            ? `Auto-segregated ${j.updatedCount} of ${j.scannedCount} account(s)!`
+            : `All ${j.scannedCount || 0} accounts are already categorized.`
+        );
+      }
+    } finally {
+      setAutoCatBusy(false);
+    }
+  }
 
   useEffect(() => {
     void isPlatformBiometricsSupported().then(setWebBioSupported);
@@ -414,10 +492,11 @@ export default function VaultSettingsPage() {
             </p>
           </div>
           <select
-            value={pinStatus?.autoLockMinutes ?? 30}
+            value={pinStatus?.autoLockMinutes ?? 1}
             onChange={(e) => handleAutoLockChange(Number(e.target.value))}
             className="vault-input rounded-xl px-3 py-2 text-xs font-bold"
           >
+            <option value={1}>1 Minute</option>
             <option value={5}>5 Minutes</option>
             <option value={15}>15 Minutes</option>
             <option value={30}>30 Minutes</option>
@@ -860,6 +939,109 @@ export default function VaultSettingsPage() {
         </label>
 
 
+        {/* Forgot PIN Security Questions Setup (Case-Insensitive!) */}
+        <form onSubmit={handleSaveSecurityQuestions} className="vault-inset space-y-3 rounded-2xl p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <HelpCircle className="h-4 w-4 text-amber-500" />
+              <span className="vault-text-primary text-xs font-extrabold">
+                Forgot PIN Recovery · Security Questions
+              </span>
+            </div>
+            {pinStatus?.hasSecurityQuestions && (
+              <span className="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[10px] font-bold text-emerald-500">
+                Active
+              </span>
+            )}
+          </div>
+          <p className="rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-[11px] font-semibold text-amber-500">
+            Answers are <strong>NOT case-sensitive</strong> (e.g., &ldquo;Mumbai&rdquo; and &ldquo;mumbai&rdquo; match identically). Used to reset your 6-digit PIN if you ever forget it.
+          </p>
+
+          {sqMsg && (
+            <div className={`rounded-xl border p-2.5 text-xs ${sqMsg.type === "ok" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-500" : "border-rose-500/40 bg-rose-500/10 text-rose-400"}`}>
+              {sqMsg.text}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <label className="vault-text-muted block text-[10px] font-bold uppercase tracking-wider">
+                Security Question 1
+              </label>
+              <select
+                value={sq1}
+                onChange={(e) => setSq1(e.target.value)}
+                className="vault-input w-full rounded-xl px-3 py-2 text-xs"
+              >
+                {DEFAULT_SECURITY_QUESTIONS.map((q) => (
+                  <option key={q} value={q}>{q}</option>
+                ))}
+              </select>
+              <input
+                value={ans1}
+                onChange={(e) => setAns1(e.target.value)}
+                placeholder="Answer 1 (not case-sensitive)"
+                className="vault-input w-full rounded-xl px-3 py-2 text-xs"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="vault-text-muted block text-[10px] font-bold uppercase tracking-wider">
+                Security Question 2
+              </label>
+              <select
+                value={sq2}
+                onChange={(e) => setSq2(e.target.value)}
+                className="vault-input w-full rounded-xl px-3 py-2 text-xs"
+              >
+                {DEFAULT_SECURITY_QUESTIONS.map((q) => (
+                  <option key={q} value={q}>{q}</option>
+                ))}
+              </select>
+              <input
+                value={ans2}
+                onChange={(e) => setAns2(e.target.value)}
+                placeholder="Answer 2 (not case-sensitive)"
+                className="vault-input w-full rounded-xl px-3 py-2 text-xs"
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={sqSaving}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 px-4 py-2 text-xs font-extrabold text-zinc-950 hover:bg-amber-400 disabled:opacity-50"
+          >
+            {sqSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+            {pinStatus?.hasSecurityQuestions ? "Update Security Questions" : "Save Security Questions"}
+          </button>
+        </form>
+
+        {/* Auto-Segregate Categories across ALL Saved Accounts */}
+        <div className="vault-inset flex flex-col justify-between gap-3 rounded-2xl p-4 sm:flex-row sm:items-center">
+          <div className="flex items-start gap-3">
+            <Wand2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+            <div>
+              <div className="vault-text-primary text-xs font-bold">
+                Auto-Segregate Categories
+              </div>
+              <p className="vault-text-muted mt-0.5 text-[11px]">
+                Automatically sort GitHub, CodeSandbox, Discord, banks, and all registered accounts into Developer, Gaming, Finance, Social, Work, or Personal.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={autoCatBusy}
+            onClick={handleAutoCategorizeAll}
+            className="vault-card vault-text-primary inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-extrabold hover:border-amber-500 hover:text-amber-500 disabled:opacity-50"
+          >
+            {autoCatBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5 text-amber-500" />}
+            Auto-Categorize All
+          </button>
+        </div>
+
         {/* Web Biometric / Passkey Unlock */}
         <div className="vault-inset flex flex-col justify-between gap-3 rounded-2xl p-4 sm:flex-row sm:items-center">
           <div className="flex items-start gap-3">
@@ -961,11 +1143,11 @@ export default function VaultSettingsPage() {
           <div className="flex items-center justify-between">
             <div className="vault-text-primary flex items-center gap-2 text-xs font-extrabold">
               <Activity className="h-4 w-4 text-amber-500" />
-              Recent Security Activity ({activityEvents.length})
+              Recent Security Activity · Last 24h ({activityEvents.length})
             </div>
           </div>
           {activityEvents.length === 0 ? (
-            <p className="vault-text-muted text-[11px]">No security events recorded yet.</p>
+            <p className="vault-text-muted text-[11px]">No security events in the last 24 hours (older activities are automatically deleted from the database).</p>
           ) : (
             <div className="max-h-52 space-y-1.5 overflow-y-auto pr-1">
               {activityEvents.slice(0, 15).map((ev) => (

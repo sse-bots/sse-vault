@@ -95,6 +95,11 @@ export const api = {
   },
   importEntries: (body: unknown) =>
     request<any>("/api/vault/import", { method: "POST", body: JSON.stringify(body) }),
+  autoCategorize: (forceAll = true) =>
+    request<{ ok: boolean; scannedCount: number; updatedCount: number }>(
+      "/api/vault/auto-categorize",
+      { method: "POST", body: JSON.stringify({ forceAll }) }
+    ),
   reencrypt: (oldHexKey?: string) =>
     request<{ ok: boolean; migratedCount: number; stillLockedCount: number }>(
       "/api/vault/reencrypt",
