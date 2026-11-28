@@ -121,7 +121,7 @@ export async function fetchLatestApkRelease(): Promise<ApkReleaseInfo> {
   try {
     const latestRes = await fetch(
       `https://api.github.com/repos/${repo}/releases/latest`,
-      { headers, next: { revalidate: 300 } }
+      { headers, cache: "no-store" }
     );
     if (latestRes.ok) {
       const json = (await latestRes.json()) as GitHubReleaseResponse;
@@ -130,7 +130,7 @@ export async function fetchLatestApkRelease(): Promise<ApkReleaseInfo> {
 
     const listRes = await fetch(
       `https://api.github.com/repos/${repo}/releases?per_page=5`,
-      { headers, next: { revalidate: 300 } }
+      { headers, cache: "no-store" }
     );
     if (listRes.ok) {
       const list = (await listRes.json()) as GitHubReleaseResponse[];

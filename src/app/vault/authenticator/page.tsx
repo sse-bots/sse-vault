@@ -125,11 +125,24 @@ export default function VaultAuthenticatorPage() {
                     size="sm"
                   />
                   <div className="min-w-0">
-                    <div className="vault-text-primary truncate text-xs font-extrabold">
-                      {item.appName}
+                    <div className="flex items-center gap-1.5">
+                      <span className="vault-text-primary truncate text-xs font-extrabold">
+                        {item.appName}
+                      </span>
+                      {item.label && item.label !== item.appName && (
+                        <span className="vault-inset vault-text-muted shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold">
+                          {item.label}
+                        </span>
+                      )}
                     </div>
-                    <div className="vault-text-muted truncate font-mono text-[11px]">
-                      {item.email || item.username || item.label}
+                    <div
+                      className={`vault-text-muted truncate font-mono text-[11px] ${
+                        privacyBlur ? "blur-sm select-none" : ""
+                      }`}
+                    >
+                      {item.username && item.email
+                        ? `@${item.username} · ${item.email}`
+                        : item.email || item.username || item.domainKey}
                     </div>
                   </div>
                 </div>

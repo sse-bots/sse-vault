@@ -105,6 +105,50 @@ const KNOWN_APP_NAMES: Record<string, string> = {
   "hostinger.com": "Hostinger",
   "godaddy.com": "GoDaddy",
   "namecheap.com": "Namecheap",
+  "codesandbox.io": "CodeSandbox",
+  "replit.com": "Replit",
+  "codepen.io": "CodePen",
+  "glitch.com": "Glitch",
+  "stackoverflow.com": "Stack Overflow",
+  "huggingface.co": "Hugging Face",
+  "postman.com": "Postman",
+  "linear.app": "Linear",
+  "sentry.io": "Sentry",
+  "uptimerobot.com": "UptimeRobot",
+  "leetcode.com": "LeetCode",
+  "hackerrank.com": "HackerRank",
+  "railway.app": "Railway",
+  "fly.dev": "Fly.io",
+  "aws.amazon.com": "AWS",
+  "azure.com": "Microsoft Azure",
+  "slack.com": "Slack",
+  "zoom.us": "Zoom",
+  "trello.com": "Trello",
+  "asana.com": "Asana",
+  "atlassian.com": "Atlassian",
+  "canva.com": "Canva",
+  "dropbox.com": "Dropbox",
+  "razorpay.com": "Razorpay",
+  "paytm.com": "Paytm",
+  "phonepe.com": "PhonePe",
+  "groww.in": "Groww",
+  "zerodha.com": "Zerodha",
+  "upstox.com": "Upstox",
+  "binance.com": "Binance",
+  "coinbase.com": "Coinbase",
+  "roblox.com": "Roblox",
+  "plarium.com": "Plarium",
+  "riotgames.com": "Riot Games",
+  "supercell.com": "Supercell",
+  "garena.com": "Garena",
+  "flipkart.com": "Flipkart",
+  "swiggy.com": "Swiggy",
+  "zomato.com": "Zomato",
+  "irctc.co.in": "IRCTC",
+  "threads.net": "Threads",
+  "snapchat.com": "Snapchat",
+  "pinterest.com": "Pinterest",
+  "tiktok.com": "TikTok",
 };
 
 /** Platform hosting suffixes where each subdomain is its own distinct website/app */
@@ -250,3 +294,257 @@ export function evaluatePasswordStrength(password: string): {
   }
   return { score: 4, label: "Strong", color: "#10b981" };
 }
+
+export type AutoDetectedCategory =
+  | "personal"
+  | "work"
+  | "dev"
+  | "gaming"
+  | "finance"
+  | "social"
+  | "other";
+
+const CATEGORY_DOMAIN_MAP: Record<string, AutoDetectedCategory> = {
+  // Developer
+  "github.com": "dev",
+  "gitlab.com": "dev",
+  "bitbucket.org": "dev",
+  "codesandbox.io": "dev",
+  "replit.com": "dev",
+  "codepen.io": "dev",
+  "glitch.com": "dev",
+  "vercel.com": "dev",
+  "vercel.app": "dev",
+  "netlify.com": "dev",
+  "netlify.app": "dev",
+  "render.com": "dev",
+  "onrender.com": "dev",
+  "mongodb.com": "dev",
+  "supabase.com": "dev",
+  "firebase.google.com": "dev",
+  "cloudflare.com": "dev",
+  "npmjs.com": "dev",
+  "docker.com": "dev",
+  "heroku.com": "dev",
+  "digitalocean.com": "dev",
+  "railway.app": "dev",
+  "fly.dev": "dev",
+  "hostinger.com": "dev",
+  "godaddy.com": "dev",
+  "namecheap.com": "dev",
+  "resend.com": "dev",
+  "openai.com": "dev",
+  "chatgpt.com": "dev",
+  "anthropic.com": "dev",
+  "claude.ai": "dev",
+  "figma.com": "dev",
+  "stackoverflow.com": "dev",
+  "huggingface.co": "dev",
+  "postman.com": "dev",
+  "linear.app": "dev",
+  "sentry.io": "dev",
+  "uptimerobot.com": "dev",
+  "leetcode.com": "dev",
+  "hackerrank.com": "dev",
+  "aws.amazon.com": "dev",
+  "azure.com": "dev",
+  "cloud.google.com": "dev",
+  "kaggle.com": "dev",
+  "npmjs.org": "dev",
+  "pypi.org": "dev",
+  "expo.dev": "dev",
+  "ngrok.com": "dev",
+  "tailscale.com": "dev",
+  "linode.com": "dev",
+  "vultr.com": "dev",
+  "hetzner.com": "dev",
+  "porkbun.com": "dev",
+  "cloudflare.dev": "dev",
+
+  // Gaming
+  "discord.com": "gaming",
+  "steam.com": "gaming",
+  "steampowered.com": "gaming",
+  "epicgames.com": "gaming",
+  "minecraft.net": "gaming",
+  "mojang.com": "gaming",
+  "twitch.tv": "gaming",
+  "roblox.com": "gaming",
+  "plarium.com": "gaming",
+  "riotgames.com": "gaming",
+  "supercell.com": "gaming",
+  "garena.com": "gaming",
+  "ea.com": "gaming",
+  "ubisoft.com": "gaming",
+  "playstation.com": "gaming",
+  "xbox.com": "gaming",
+  "nintendo.com": "gaming",
+  "rockstargames.com": "gaming",
+  "battle.net": "gaming",
+  "curseforge.com": "gaming",
+  "modrinth.com": "gaming",
+  "aternos.org": "gaming",
+
+  // Finance
+  "paypal.com": "finance",
+  "stripe.com": "finance",
+  "razorpay.com": "finance",
+  "paytm.com": "finance",
+  "phonepe.com": "finance",
+  "groww.in": "finance",
+  "zerodha.com": "finance",
+  "upstox.com": "finance",
+  "binance.com": "finance",
+  "coinbase.com": "finance",
+  "wise.com": "finance",
+  "sbi.co.in": "finance",
+  "onlinesbi.sbi": "finance",
+  "hdfcbank.com": "finance",
+  "icicibank.com": "finance",
+  "axisbank.com": "finance",
+  "kotak.com": "finance",
+  "payment-cards.local": "finance",
+
+  // Social
+  "instagram.com": "social",
+  "facebook.com": "social",
+  "x.com": "social",
+  "reddit.com": "social",
+  "whatsapp.com": "social",
+  "telegram.org": "social",
+  "linkedin.com": "social",
+  "snapchat.com": "social",
+  "threads.net": "social",
+  "pinterest.com": "social",
+  "tiktok.com": "social",
+  "youtube.com": "social",
+  "quora.com": "social",
+  "medium.com": "social",
+
+  // Work
+  "notion.so": "work",
+  "slack.com": "work",
+  "zoom.us": "work",
+  "trello.com": "work",
+  "asana.com": "work",
+  "atlassian.com": "work",
+  "jira.com": "work",
+  "canva.com": "work",
+  "dropbox.com": "work",
+  "miro.com": "work",
+  "airtable.com": "work",
+  "clickup.com": "work",
+  "monday.com": "work",
+  "calendly.com": "work",
+
+  // Personal
+  "google.com": "personal",
+  "apple.com": "personal",
+  "icloud.com": "personal",
+  "microsoft.com": "personal",
+  "proton.me": "personal",
+  "protonmail.com": "personal",
+  "amazon.com": "personal",
+  "amazon.in": "personal",
+  "flipkart.com": "personal",
+  "spotify.com": "personal",
+  "netflix.com": "personal",
+  "swiggy.com": "personal",
+  "zomato.com": "personal",
+  "irctc.co.in": "personal",
+  "bitwarden.com": "personal",
+  "sse-account.vercel.app": "personal",
+  "secure-note.local": "personal",
+};
+
+/**
+ * Automatically categorizes a website/app into `dev`, `gaming`, `finance`,
+ * `social`, `work`, or `personal` using exact domain lookup + smart suffixes/keywords.
+ */
+export function detectVaultCategory(
+  domainOrUrl: string,
+  appName?: string | null,
+  label?: string | null,
+  entryType?: "login" | "note" | "card"
+): AutoDetectedCategory {
+  if (entryType === "card") return "finance";
+  if (entryType === "note") return "personal";
+
+  const domain = extractDomainKey(domainOrUrl) || (domainOrUrl || "").trim().toLowerCase();
+  if (domain && CATEGORY_DOMAIN_MAP[domain]) {
+    return CATEGORY_DOMAIN_MAP[domain];
+  }
+
+  // Platform hosting domains (*.vercel.app, *.onrender.com, *.netlify.app, etc.)
+  if (domain) {
+    if (
+      domain.endsWith(".vercel.app") ||
+      domain.endsWith(".netlify.app") ||
+      domain.endsWith(".onrender.com") ||
+      domain.endsWith(".pages.dev") ||
+      domain.endsWith(".railway.app") ||
+      domain.endsWith(".fly.dev") ||
+      domain.endsWith(".herokuapp.com") ||
+      domain.endsWith(".github.io") ||
+      domain.endsWith(".dev")
+    ) {
+      if (domain === "sse-account.vercel.app") return "personal";
+      return "dev";
+    }
+  }
+
+  const hay = `${domain} ${appName || ""} ${label || ""}`.toLowerCase();
+
+  if (
+    /\b(github|gitlab|codesandbox|replit|codepen|vercel|netlify|render|mongo|supabase|firebase|docker|cloud|aws|azure|hostinger|vps|pterodactyl|api|console|developer|dev|coding|code|npm|pypi|stack|expo|bot|server|ssh|git|database|db|hosting)\b/.test(
+      hay
+    )
+  ) {
+    return "dev";
+  }
+
+  if (
+    /\b(game|gaming|steam|epic|minecraft|discord|twitch|roblox|plarium|mech|free\s*fire|garena|riot|valorant|supercell|playstation|xbox|nintendo|esports|tournament)\b/.test(
+      hay
+    )
+  ) {
+    return "gaming";
+  }
+
+  if (
+    /\b(bank|upi|pay|wallet|stripe|razorpay|paypal|paytm|phonepe|finance|invest|zerodha|groww|upstox|crypto|binance|coinbase|trading|demat|card|loan|tax|gst|insurance)\b/.test(
+      hay
+    )
+  ) {
+    return "finance";
+  }
+
+  if (
+    /\b(insta|facebook|twitter|reddit|whatsapp|telegram|linkedin|snapchat|threads|tiktok|pinterest|social|youtube)\b/.test(
+      hay
+    )
+  ) {
+    return "social";
+  }
+
+  if (
+    /\b(slack|zoom|notion|jira|trello|asana|atlassian|office|workspace|canva|dropbox|teams|meeting|work|company|corp|hr)\b/.test(
+      hay
+    )
+  ) {
+    return "work";
+  }
+
+  return "personal";
+}
+
+export const DEFAULT_SECURITY_QUESTIONS: string[] = [
+  "What city were you born in?",
+  "What is the name of your first school?",
+  "What is your favourite game or movie?",
+  "What was your childhood nickname?",
+  "What is the name of your first pet?",
+  "What is your mother's maiden name?",
+  "What is the name of your favourite teacher?",
+  "What street did you grow up on?",
+];

@@ -9,12 +9,50 @@ export type VaultActivityEvent =
   | "pin_failed"
   | "pin_change"
   | "pin_reset"
+  | "security_questions"
   | "webauthn_register"
   | "webauthn_unlock"
   | "export"
   | "share_created"
   | "trash_empty"
+  | "auto_categorize"
   | "reencrypt";
+
+export const ACTIVITY_RETENTION_SECONDS = 24 * 60 * 60; // 24 hours
+const ACTIVITY_RETENTION_MS = ACTIVITY_RETENTION_SECONDS * 1000;
+
+let ttlIndexReady: Promise<void> | null = null;
+
+async function ensureActivityTtlIndex(): Promise<void> {
+  if (!ttlIndexReady) {
+    ttlIndexReady = (async () => {
+      try {
+        const { vaultActivityLogs } = await getVaultCollections();
+        await vaultActivityLogs.createIndex(
+          { createdAt: 1 },
+          {
+            name: "vault_activity_ttl_24h",
+            expireAfterSeconds: ACTIVITY_RETENTION_SECONDS,
+          }
+        );
+      } catch {
+        // Ignore if index already exists with same key
+      }
+    })();
+  }
+  await ttlIndexReady;
+}
+
+export async function purgeExpiredVaultActivities(): Promise<void> {
+  try {
+    await ensureActivityTtlIndex();
+    const { vaultActivityLogs } = await getVaultCollections();
+    const cutoff = new Date(Date.now() - ACTIVITY_RETENTION_MS);
+    await vaultActivityLogs.deleteMany({ createdAt: { $lte: cutoff } });
+  } catch {
+    /* non-fatal */
+  }
+}
 
 export async function logVaultActivity(
   ownerUserId: string,
@@ -33,16 +71,24 @@ export async function logVaultActivity(
       /* ignore */
     }
 
+    await ensureActivityTtlIndex();
     const { vaultActivityLogs } = await getVaultCollections();
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - ACTIVITY_RETENTION_MS);
+
     await vaultActivityLogs.insertOne({
       ownerUserId,
       event,
       label,
       client,
       userAgent,
-      createdAt: new Date(),
+      createdAt: now,
     });
 
+    // Immediately clean up any activities older than 24 hours across the collection
+    await vaultActivityLogs.deleteMany({ createdAt: { $lte: cutoff } });
+
+    // Also cap at latest 50 events within the 24h window per user
     const oldDocs = await vaultActivityLogs
       .find({ ownerUserId })
       .sort({ createdAt: -1 })
@@ -63,9 +109,11 @@ export async function getRecentVaultActivity(
   ownerUserId: string,
   limit = 30
 ): Promise<VaultActivityDTO[]> {
+  await purgeExpiredVaultActivities();
   const { vaultActivityLogs } = await getVaultCollections();
+  const cutoff = new Date(Date.now() - ACTIVITY_RETENTION_MS);
   const docs = await vaultActivityLogs
-    .find({ ownerUserId })
+    .find({ ownerUserId, createdAt: { $gte: cutoff } })
     .sort({ createdAt: -1 })
     .limit(limit)
     .toArray();

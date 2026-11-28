@@ -6,13 +6,17 @@ import { getVaultCollections } from "@/lib/mongodb";
 import {
   LOCKOUT_MS,
   MAX_FAILED_ATTEMPTS,
+  RESET_WINDOW_MS,
   applyPinUnlockCookie,
   clearPinUnlockCookie,
   getVaultPinStatus,
+  hashSecurityAnswer,
   hashVaultPin,
   nativePinTokenFor,
   sanitizeAutoLockMinutes,
+  verifySecurityAnswer,
   verifyVaultPinHash,
+  type StoredSecurityQuestion,
 } from "@/lib/vault-pin";
 import { logVaultActivity } from "@/lib/activity";
 
@@ -20,18 +24,23 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const NO_CACHE = { "Cache-Control": "no-store" };
-const RESET_WINDOW_MS = 10 * 60 * 1000;
 
 const sixDigitSchema = z
   .string()
   .trim()
   .regex(/^\d{6}$/, "PIN must be exactly 6 digits.");
 
+const securityQuestionInputSchema = z.object({
+  question: z.string().trim().min(5, "Security question is too short.").max(180),
+  answer: z.string().trim().min(2, "Answer must be at least 2 characters.").max(120),
+});
+
 const pinActionSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("setup"),
     pin: sixDigitSchema,
     confirmPin: sixDigitSchema,
+    securityQuestions: z.array(securityQuestionInputSchema).min(2).max(3).optional(),
   }),
   z.object({
     action: z.literal("verify"),
@@ -45,6 +54,16 @@ const pinActionSchema = z.discriminatedUnion("action", [
   }),
   z.object({
     action: z.literal("reset"),
+    newPin: sixDigitSchema,
+    confirmPin: sixDigitSchema,
+  }),
+  z.object({
+    action: z.literal("set_security_questions"),
+    questions: z.array(securityQuestionInputSchema).min(2, "Set at least 2 security questions.").max(3),
+  }),
+  z.object({
+    action: z.literal("reset_via_questions"),
+    answers: z.array(z.string().trim().min(1, "Please answer all security questions.").max(120)).min(2).max(3),
     newPin: sixDigitSchema,
     confirmPin: sixDigitSchema,
   }),
@@ -66,12 +85,10 @@ export async function GET() {
     );
   }
   const pinStatus = await getVaultPinStatus(ctx.userId);
-  const rawSess = await getSession();
-  const canResetPin = Boolean(
-    rawSess?.pinResetFreshAt &&
-      Date.now() - rawSess.pinResetFreshAt <= RESET_WINDOW_MS
+  return NextResponse.json(
+    { pinStatus, canResetPin: Boolean(pinStatus.canResetPin) },
+    { headers: NO_CACHE }
   );
-  return NextResponse.json({ pinStatus, canResetPin }, { headers: NO_CACHE });
 }
 
 export async function POST(req: Request) {
@@ -106,6 +123,7 @@ export async function POST(req: Request) {
 
   const existing = await vaultPinConfigs.findOne({ ownerUserId: ctx.userId });
 
+  // 1. FIRST-TIME PIN SETUP (defaults to 1 min auto-lock!)
   if (data.action === "setup") {
     if (existing?.pinHash) {
       return NextResponse.json(
@@ -122,8 +140,15 @@ export async function POST(req: Request) {
 
     const { hash, salt } = hashVaultPin(data.pin);
     const now = new Date();
-    const autoLockMinutes = 30;
+    const autoLockMinutes = 1;
     const pinVersion = 1;
+
+    const storedQuestions: StoredSecurityQuestion[] = (
+      data.securityQuestions || []
+    ).map((q) => {
+      const { answerHash, answerSalt } = hashSecurityAnswer(q.answer);
+      return { question: q.question.trim(), answerHash, answerSalt };
+    });
 
     await vaultPinConfigs.updateOne(
       { ownerUserId: ctx.userId },
@@ -136,6 +161,9 @@ export async function POST(req: Request) {
           autoLockMinutes,
           failedAttempts: 0,
           lockedUntil: null,
+          ...(storedQuestions.length >= 2
+            ? { securityQuestions: storedQuestions }
+            : {}),
           updatedAt: now,
         },
         $setOnInsert: { createdAt: now },
@@ -158,6 +186,8 @@ export async function POST(req: Request) {
         autoLockMinutes,
         failedAttempts: 0,
         lockedUntil: null,
+        hasSecurityQuestions: storedQuestions.length >= 2,
+        securityQuestions: storedQuestions.map((q) => q.question),
       },
     };
     const res = NextResponse.json(
@@ -172,6 +202,186 @@ export async function POST(req: Request) {
     return res;
   }
 
+  // 2. SAVE / UPDATE SECURITY QUESTIONS (requires unlocked vault)
+  if (data.action === "set_security_questions") {
+    const status = await getVaultPinStatus(ctx.userId);
+    if (!status.unlocked) {
+      return NextResponse.json(
+        { error: "Unlock your vault first to update security questions." },
+        { status: 423, headers: NO_CACHE }
+      );
+    }
+
+    const storedQuestions: StoredSecurityQuestion[] = data.questions.map((q) => {
+      const { answerHash, answerSalt } = hashSecurityAnswer(q.answer);
+      return { question: q.question.trim(), answerHash, answerSalt };
+    });
+
+    await vaultPinConfigs.updateOne(
+      { ownerUserId: ctx.userId },
+      { $set: { securityQuestions: storedQuestions, updatedAt: new Date() } }
+    );
+
+    await logVaultActivity(
+      ctx.userId,
+      "security_questions",
+      `Updated ${storedQuestions.length} case-insensitive PIN recovery security questions`
+    );
+
+    const updatedStatus = await getVaultPinStatus(ctx.userId);
+    return NextResponse.json(
+      { ok: true, pinStatus: updatedStatus },
+      { headers: NO_CACHE }
+    );
+  }
+
+  // 3. FORGOT PIN RESET VIA SECURITY QUESTIONS (CASE-INSENSITIVE!)
+  if (data.action === "reset_via_questions") {
+    if (!existing?.pinHash) {
+      return NextResponse.json(
+        { error: "No Vault PIN is configured yet." },
+        { status: 400, headers: NO_CACHE }
+      );
+    }
+
+    const lockedUntil = existing.lockedUntil
+      ? new Date(existing.lockedUntil as string | Date)
+      : null;
+    if (lockedUntil && lockedUntil.getTime() > Date.now()) {
+      const secs = Math.ceil((lockedUntil.getTime() - Date.now()) / 1000);
+      return NextResponse.json(
+        {
+          error: `Too many wrong attempts. Try again in ${secs}s.`,
+          lockedUntil: lockedUntil.toISOString(),
+        },
+        { status: 429, headers: NO_CACHE }
+      );
+    }
+
+    const savedQs: StoredSecurityQuestion[] = Array.isArray(
+      existing.securityQuestions
+    )
+      ? (existing.securityQuestions as StoredSecurityQuestion[])
+      : [];
+    if (savedQs.length < 2) {
+      return NextResponse.json(
+        {
+          error:
+            "Security questions are not set up on this account yet. Use SSE Accounts verification to reset your PIN.",
+        },
+        { status: 400, headers: NO_CACHE }
+      );
+    }
+
+    if (data.newPin !== data.confirmPin) {
+      return NextResponse.json(
+        { error: "New PINs do not match." },
+        { status: 400, headers: NO_CACHE }
+      );
+    }
+
+    if (data.answers.length < savedQs.length) {
+      return NextResponse.json(
+        { error: "Please answer all security questions." },
+        { status: 400, headers: NO_CACHE }
+      );
+    }
+
+    const allCorrect = savedQs.every((sq, idx) =>
+      verifySecurityAnswer(data.answers[idx] || "", sq.answerHash, sq.answerSalt)
+    );
+
+    if (!allCorrect) {
+      const nextFails = Number(existing.failedAttempts || 0) + 1;
+      const shouldLock = nextFails >= MAX_FAILED_ATTEMPTS;
+      const nextLockedUntil = shouldLock
+        ? new Date(Date.now() + LOCKOUT_MS)
+        : null;
+
+      await vaultPinConfigs.updateOne(
+        { ownerUserId: ctx.userId },
+        {
+          $set: {
+            failedAttempts: shouldLock ? 0 : nextFails,
+            lockedUntil: nextLockedUntil,
+            updatedAt: new Date(),
+          },
+        }
+      );
+
+      await logVaultActivity(
+        ctx.userId,
+        "pin_failed",
+        "Failed security question verification during PIN reset"
+      );
+
+      return NextResponse.json(
+        {
+          error: shouldLock
+            ? "Too many wrong answers. Recovery locked for 2 minutes."
+            : `One or more answers did not match (answers are not case-sensitive). ${MAX_FAILED_ATTEMPTS - nextFails} attempt(s) left.`,
+          lockedUntil: nextLockedUntil ? nextLockedUntil.toISOString() : null,
+        },
+        { status: shouldLock ? 429 : 401, headers: NO_CACHE }
+      );
+    }
+
+    const { hash, salt } = hashVaultPin(data.newPin);
+    const nextVersion = Number(existing.pinVersion || 0) + 1;
+    const autoLockMinutes = sanitizeAutoLockMinutes(existing.autoLockMinutes ?? 1);
+
+    await vaultPinConfigs.updateOne(
+      { ownerUserId: ctx.userId },
+      {
+        $set: {
+          pinHash: hash,
+          pinSalt: salt,
+          pinVersion: nextVersion,
+          autoLockMinutes,
+          failedAttempts: 0,
+          lockedUntil: null,
+          updatedAt: new Date(),
+        },
+      }
+    );
+
+    await logVaultActivity(
+      ctx.userId,
+      "pin_reset",
+      "Reset 6-digit Vault PIN using Security Questions"
+    );
+
+    const nativeToken = await nativePinTokenFor({
+      userId: ctx.userId,
+      pinVersion: nextVersion,
+      autoLockMinutes,
+    });
+    const resJson = {
+      ok: true,
+      pinStatus: {
+        hasPin: true,
+        unlocked: true,
+        autoLockMinutes,
+        failedAttempts: 0,
+        lockedUntil: null,
+        hasSecurityQuestions: true,
+        securityQuestions: savedQs.map((q) => q.question),
+        canResetPin: false,
+      },
+    };
+    const res = NextResponse.json(
+      nativeToken ? { ...resJson, pinToken: nativeToken } : resJson,
+      { headers: NO_CACHE }
+    );
+    applyPinUnlockCookie(res, {
+      userId: ctx.userId,
+      pinVersion: nextVersion,
+      autoLockMinutes,
+    });
+    return res;
+  }
+
+  // 4. FORGOT PIN RESET VIA FRESH SSE ACCOUNTS RE-AUTH
   if (data.action === "reset") {
     const rawSess = await getSession();
     const fresh = Boolean(
@@ -198,7 +408,7 @@ export async function POST(req: Request) {
     const { hash, salt } = hashVaultPin(data.newPin);
     const nextVersion = Number(existing?.pinVersion || 0) + 1;
     const autoLockMinutes = sanitizeAutoLockMinutes(
-      existing?.autoLockMinutes ?? 30
+      existing?.autoLockMinutes ?? 1
     );
     const now = new Date();
 
@@ -223,8 +433,14 @@ export async function POST(req: Request) {
     await logVaultActivity(
       ctx.userId,
       "pin_reset",
-      "Reset 6-digit Vault PIN via SSE Accounts re-authentication"
+      "Reset 6-digit Vault PIN via SSE Accounts verification"
     );
+
+    const savedQs: StoredSecurityQuestion[] = Array.isArray(
+      existing?.securityQuestions
+    )
+      ? (existing.securityQuestions as StoredSecurityQuestion[])
+      : [];
 
     const nativeToken = await nativePinTokenFor({
       userId: ctx.userId,
@@ -239,6 +455,9 @@ export async function POST(req: Request) {
         autoLockMinutes,
         failedAttempts: 0,
         lockedUntil: null,
+        hasSecurityQuestions: savedQs.length >= 2,
+        securityQuestions: savedQs.map((q) => q.question),
+        canResetPin: false,
       },
     };
     const res = NextResponse.json(
@@ -260,6 +479,12 @@ export async function POST(req: Request) {
     );
   }
 
+  const savedQs: StoredSecurityQuestion[] = Array.isArray(
+    existing.securityQuestions
+  )
+    ? (existing.securityQuestions as StoredSecurityQuestion[])
+    : [];
+
   const lockedUntil = existing.lockedUntil
     ? new Date(existing.lockedUntil as string | Date)
     : null;
@@ -278,6 +503,7 @@ export async function POST(req: Request) {
     );
   }
 
+  // 5. VERIFY 6-DIGIT PIN
   if (data.action === "verify") {
     const ok = verifyVaultPinHash(
       data.pin,
@@ -338,7 +564,7 @@ export async function POST(req: Request) {
 
     const pinVersion = Number(existing.pinVersion || 1);
     const autoLockMinutes = sanitizeAutoLockMinutes(
-      existing.autoLockMinutes ?? 30
+      existing.autoLockMinutes ?? 1
     );
 
     const nativeToken = await nativePinTokenFor({
@@ -354,6 +580,8 @@ export async function POST(req: Request) {
         autoLockMinutes,
         failedAttempts: 0,
         lockedUntil: null,
+        hasSecurityQuestions: savedQs.length >= 2,
+        securityQuestions: savedQs.map((q) => q.question),
       },
     };
     const res = NextResponse.json(
@@ -368,6 +596,7 @@ export async function POST(req: Request) {
     return res;
   }
 
+  // 6. CHANGE 6-DIGIT PIN
   if (data.action === "change") {
     const ok = verifyVaultPinHash(
       data.currentPin,
@@ -396,7 +625,7 @@ export async function POST(req: Request) {
     const { hash, salt } = hashVaultPin(data.newPin);
     const nextVersion = Number(existing.pinVersion || 1) + 1;
     const autoLockMinutes = sanitizeAutoLockMinutes(
-      existing.autoLockMinutes ?? 30
+      existing.autoLockMinutes ?? 1
     );
 
     await vaultPinConfigs.updateOne(
@@ -428,6 +657,8 @@ export async function POST(req: Request) {
         autoLockMinutes,
         failedAttempts: 0,
         lockedUntil: null,
+        hasSecurityQuestions: savedQs.length >= 2,
+        securityQuestions: savedQs.map((q) => q.question),
       },
     };
     const res = NextResponse.json(
@@ -442,6 +673,7 @@ export async function POST(req: Request) {
     return res;
   }
 
+  // 7. UPDATE AUTO-LOCK TIMER (1 min, 5 min, 15 min, 30 min, 1 hour, 0)
   if (data.action === "preferences") {
     const status = await getVaultPinStatus(ctx.userId);
     if (!status.unlocked) {
@@ -470,6 +702,8 @@ export async function POST(req: Request) {
         autoLockMinutes,
         failedAttempts: 0,
         lockedUntil: null,
+        hasSecurityQuestions: savedQs.length >= 2,
+        securityQuestions: savedQs.map((q) => q.question),
       },
     };
     const res = NextResponse.json(

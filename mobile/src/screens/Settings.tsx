@@ -34,6 +34,7 @@ import {
   useToast,
 } from "../ui";
 import type { ActivityEvent } from "../types";
+import { DEFAULT_SECURITY_QUESTIONS } from "../lib/domain";
 import { PinPad } from "./Pin";
 
 const AUTO_LOCK: { m: number; label: string }[] = [
@@ -56,13 +57,14 @@ export default function Settings({ onImport, onTrash }: { onImport: () => void; 
     enableBiometrics,
     disableBiometrics,
     setAutoLock,
+    setSecurityQuestions,
     error,
     clearError,
     reconnect,
   } = useAuth();
   const { theme, setTheme, resetTheme, privacyBlur, setPrivacyBlur } =
     usePrefs();
-  const { items, savedAt } = useVault();
+  const { items, savedAt, refresh } = useVault();
   const updater = useUpdater();
   const toast = useToast();
 
@@ -74,6 +76,12 @@ export default function Settings({ onImport, onTrash }: { onImport: () => void; 
   const [encModal, setEncModal] = useState(false);
   const [encPass, setEncPass] = useState("");
   const [encBusy, setEncBusy] = useState(false);
+  const [autoCatBusy, setAutoCatBusy] = useState(false);
+  const [sqModal, setSqModal] = useState(false);
+  const [sq1, setSq1] = useState(DEFAULT_SECURITY_QUESTIONS[0]);
+  const [sq2, setSq2] = useState(DEFAULT_SECURITY_QUESTIONS[1]);
+  const [ans1, setAns1] = useState("");
+  const [ans2, setAns2] = useState("");
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [autofill, setAutofill] = useState<AutofillStatus>({
     supported: false,
@@ -86,6 +94,31 @@ export default function Settings({ onImport, onTrash }: { onImport: () => void; 
   const refreshAutofillStatus = async () => {
     const st = await getAutofillStatus();
     setAutofill(st);
+  };
+
+  useEffect(() => {
+    if (pinStatus?.securityQuestions && pinStatus.securityQuestions.length >= 2) {
+      setSq1(pinStatus.securityQuestions[0]);
+      setSq2(pinStatus.securityQuestions[1]);
+    }
+  }, [pinStatus?.securityQuestions]);
+
+  const handleAutoCategorize = async () => {
+    if (offline || autoCatBusy) return;
+    setAutoCatBusy(true);
+    try {
+      const res = await api.autoCategorize(true);
+      await refresh();
+      toast.show(
+        res.updatedCount > 0
+          ? `Auto-segregated ${res.updatedCount} of ${res.scannedCount} accounts`
+          : `All ${res.scannedCount} accounts already categorized`
+      );
+    } catch (e) {
+      Alert.alert("Auto-categorize failed", (e as Error).message);
+    } finally {
+      setAutoCatBusy(false);
+    }
   };
 
   useEffect(() => {
@@ -322,6 +355,16 @@ export default function Settings({ onImport, onTrash }: { onImport: () => void; 
             }
             onPress={offline ? undefined : () => setPinModal(true)}
           />
+          <SettingsRow
+            icon="help-circle-outline"
+            title="Security Questions (Forgot PIN)"
+            subtitle={
+              pinStatus?.hasSecurityQuestions
+                ? "Active · Answers are NOT case-sensitive"
+                : "Set 2 recovery questions to reset a forgotten PIN"
+            }
+            onPress={offline ? undefined : () => setSqModal(true)}
+          />
           {bioAvailable && (
             <SettingsRow
               icon="finger-print"
@@ -369,7 +412,11 @@ export default function Settings({ onImport, onTrash }: { onImport: () => void; 
                 key={o.m}
                 label={o.label}
                 active={pinStatus?.autoLockMinutes === o.m}
-                onPress={() => !offline && setAutoLock(o.m)}
+                onPress={async () => {
+                  if (offline) return;
+                  await setAutoLock(o.m);
+                  toast.show(`Auto-lock set to ${o.label}`);
+                }}
               />
             ))}
           </View>
@@ -457,11 +504,11 @@ export default function Settings({ onImport, onTrash }: { onImport: () => void; 
           />
         )}
 
-        <SectionTitle>Recent Security Activity</SectionTitle>
+        <SectionTitle>Recent Security Activity (24h · Auto-Deleted)</SectionTitle>
         <Card style={{ gap: 8 }}>
           {activity.length === 0 ? (
             <Text style={{ color: c.muted, fontSize: 12 }}>
-              {offline ? "Reconnect to view security activity." : "No recent events yet."}
+              {offline ? "Reconnect to view security activity." : "No events in the last 24 hours. Older activities are deleted automatically."}
             </Text>
           ) : (
             activity.slice(0, 10).map((ev) => (
@@ -606,6 +653,84 @@ export default function Settings({ onImport, onTrash }: { onImport: () => void; 
             />
             <Button title="Export Encrypted Backup" icon="lock-closed-outline" loading={encBusy} onPress={doEncryptedExport} />
           </Card>
+        </View>
+      </Modal>
+      <Modal visible={sqModal} animationType="slide" onRequestClose={() => setSqModal(false)}>
+        <View style={{ flex: 1, backgroundColor: c.bg, paddingTop: 44 }}>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              paddingHorizontal: 8,
+              paddingBottom: 8,
+              borderBottomWidth: 1,
+              borderBottomColor: c.border,
+            }}
+          >
+            <IconButton icon="close" onPress={() => setSqModal(false)} label="Close" />
+            <Text style={{ color: c.text, fontSize: 17, fontWeight: "800", flex: 1, textAlign: "center" }}>
+              Security Questions
+            </Text>
+            <View style={{ width: 40 }} />
+          </View>
+          <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 48 }} keyboardShouldPersistTaps="handled">
+            <View
+              style={{
+                backgroundColor: c.accentSoft,
+                borderWidth: 1,
+                borderColor: c.accentBorder,
+                borderRadius: 12,
+                padding: 12,
+              }}
+            >
+              <Text style={{ color: c.accentLabel, fontSize: 12, fontWeight: "800" }}>
+                Answers are NOT case-sensitive (uppercase and lowercase letters are treated identically).
+              </Text>
+            </View>
+
+            <Card style={{ gap: 8 }}>
+              <Text style={{ color: c.muted, fontSize: 11, fontWeight: "800" }}>QUESTION 1 (TAP TO PICK OR TYPE CUSTOM)</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                {DEFAULT_SECURITY_QUESTIONS.slice(0, 4).map((q) => (
+                  <Chip key={q} label={q} active={sq1 === q} onPress={() => setSq1(q)} />
+                ))}
+              </ScrollView>
+              <Field value={sq1} onChangeText={setSq1} placeholder="Security Question 1" autoCapitalize="sentences" />
+              <Field value={ans1} onChangeText={setAns1} placeholder="Answer 1 (not case-sensitive)" />
+            </Card>
+
+            <Card style={{ gap: 8 }}>
+              <Text style={{ color: c.muted, fontSize: 11, fontWeight: "800" }}>QUESTION 2 (TAP TO PICK OR TYPE CUSTOM)</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                {DEFAULT_SECURITY_QUESTIONS.slice(4).map((q) => (
+                  <Chip key={q} label={q} active={sq2 === q} onPress={() => setSq2(q)} />
+                ))}
+              </ScrollView>
+              <Field value={sq2} onChangeText={setSq2} placeholder="Security Question 2" autoCapitalize="sentences" />
+              <Field value={ans2} onChangeText={setAns2} placeholder="Answer 2 (not case-sensitive)" />
+            </Card>
+
+            <Button
+              title="Save Security Questions"
+              icon="shield-checkmark-outline"
+              onPress={async () => {
+                if (sq1.trim().length < 5 || sq2.trim().length < 5 || ans1.trim().length < 2 || ans2.trim().length < 2) {
+                  Alert.alert("Incomplete", "Enter both questions and answers (min 2 chars each).");
+                  return;
+                }
+                const ok = await setSecurityQuestions([
+                  { question: sq1.trim(), answer: ans1.trim() },
+                  { question: sq2.trim(), answer: ans2.trim() },
+                ]);
+                if (ok) {
+                  setAns1("");
+                  setAns2("");
+                  setSqModal(false);
+                  toast.show("Security questions saved!");
+                }
+              }}
+            />
+          </ScrollView>
         </View>
       </Modal>
       <Toast message={toast.msg} />

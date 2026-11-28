@@ -110,6 +110,9 @@ export interface PinStatus {
   autoLockMinutes: number;
   failedAttempts: number;
   lockedUntil: string | null;
+  hasSecurityQuestions?: boolean;
+  securityQuestions?: string[];
+  canResetPin?: boolean;
 }
 
 export interface VaultUser {
