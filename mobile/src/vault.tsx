@@ -7,6 +7,7 @@ import {
   loadOfflineQueue,
   saveOffline,
   saveOfflineQueue,
+  type OfflineQueuedOp,
 } from "./offline";
 import { extractDomainKey, getAppNameForDomain, normalizeWebsiteUrl } from "./lib/domain";
 import type { ItemInput, VaultItem } from "./types";
@@ -61,7 +62,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     if (queue.length === 0) return;
 
     setSyncing(true);
-    const remaining = [];
+    const remaining: OfflineQueuedOp[] = [];
     const tempIdMap = new Map<string, string>();
     try {
       for (const op of queue) {

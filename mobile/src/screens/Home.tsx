@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import {
+  Alert,
   FlatList,
   Pressable,
   RefreshControl,
@@ -9,7 +10,6 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { Alert } from "react-native";
 import { api } from "../api";
 import { useVault, type AppGroup } from "../vault";
 import { useAuth } from "../auth";

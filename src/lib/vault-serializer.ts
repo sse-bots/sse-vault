@@ -72,10 +72,13 @@ export function serializeVaultDoc(doc: Document): VaultItemDTO {
     decryptionStatus = mergeStatus(decryptionStatus, cfRes.source);
     if (cfRes.value) {
       try {
-        const parsed = JSON.parse(cfRes.value) as unknown[];
+        const parsed: unknown = JSON.parse(cfRes.value);
         if (Array.isArray(parsed)) {
-          customFields = parsed
-            .filter((x): x is Record<string, unknown> => Boolean(x && typeof x === "object"))
+          customFields = (parsed as unknown[])
+            .filter(
+              (x: unknown): x is Record<string, unknown> =>
+                Boolean(x && typeof x === "object")
+            )
             .map((x, idx) => ({
               id: String(x.id || `cf_${idx}`),
               label: String(x.label || "").trim(),

@@ -60,7 +60,9 @@ export async function checkForUpdate(): Promise<{ latest: UpdateInfo | null; has
     const r = await res.json();
     const version = String(r.tag_name || "").replace(/^v/i, "");
     if (!version) return { latest: null, hasUpdate: false };
-    const apk = (r.assets || []).find((a: any) => String(a.name || "").toLowerCase().endsWith(".apk"));
+    const apk = (
+      (r.assets || []) as Array<{ name?: string; browser_download_url?: string }>
+    ).find((a) => String(a.name || "").toLowerCase().endsWith(".apk"));
     const latest: UpdateInfo = {
       version,
       apkUrl: apk?.browser_download_url || null,

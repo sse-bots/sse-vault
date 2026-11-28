@@ -75,7 +75,12 @@ async function readAndDecrypt<T>(path: string): Promise<T | null> {
     if (!info.exists) return null;
     const key = await getKey(false);
     if (!key) return null;
-    const f = JSON.parse(await FileSystem.readAsStringAsync(path));
+    const f = JSON.parse(await FileSystem.readAsStringAsync(path)) as {
+      v: number;
+      iv: string;
+      ct: string;
+      tag: string;
+    };
     const iv = unhex(f.iv), ct = unhex(f.ct);
     const expect = hex(hmacSha256(sha256(concat(key, utf8("mac"))), concat(iv, ct)));
     if (expect !== f.tag) return null;
@@ -132,7 +137,7 @@ export async function hasOffline(): Promise<boolean> {
 export async function verifyOfflinePin(pin: string): Promise<"ok" | "bad" | "wiped"> {
   const raw = await SecureStore.getItemAsync(K_VER).catch(() => null);
   if (!raw) return "bad";
-  const { salt, hash } = JSON.parse(raw);
+  const { salt, hash } = JSON.parse(raw) as { salt: string; hash: string };
   if (stretch(pin, unhex(salt)) === hash) {
     await SecureStore.setItemAsync(K_FAILS, "0");
     return "ok";

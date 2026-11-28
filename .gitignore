@@ -10,3 +10,4 @@ android/
 *.jks
 *.keystore
 release-output/
+package-lock.json

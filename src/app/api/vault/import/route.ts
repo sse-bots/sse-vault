@@ -126,18 +126,31 @@ export async function POST(req: Request) {
     }
     try {
       const decryptedJson = decryptVaultBackup(rawEnc, pass);
-      const parsedJson = JSON.parse(decryptedJson) as { entries?: unknown[] };
-      const rawList = Array.isArray(parsedJson.entries)
-        ? parsedJson.entries
-        : Array.isArray(parsedJson)
-          ? parsedJson
+      const parsedJson: unknown = JSON.parse(decryptedJson);
+      const rawList: unknown[] = Array.isArray(parsedJson)
+        ? parsedJson
+        : parsedJson &&
+            typeof parsedJson === "object" &&
+            Array.isArray((parsedJson as { entries?: unknown[] }).entries)
+          ? (parsedJson as { entries: unknown[] }).entries
           : [];
       const mapped = rawList
-        .filter((x): x is Record<string, unknown> => Boolean(x && typeof x === "object"))
+        .filter(
+          (x: unknown): x is Record<string, unknown> =>
+            Boolean(x && typeof x === "object")
+        )
         .slice(0, 500)
         .map((x) => ({
-          entryType: x.entryType === "note" || x.entryType === "card" ? x.entryType : "login",
-          url: String(x.url || (x.domainKey ? `https://${x.domainKey}` : "https://secure-note.local")),
+          entryType:
+            x.entryType === "note" || x.entryType === "card"
+              ? x.entryType
+              : "login",
+          url: String(
+            x.url ||
+              (x.domainKey
+                ? `https://${x.domainKey}`
+                : "https://secure-note.local")
+          ),
           label: String(x.label || x.appName || ""),
           authType: x.authType === "oauth" ? "oauth" : "password",
           oauthProvider: String(x.oauthProvider || ""),
@@ -149,18 +162,25 @@ export async function POST(req: Request) {
           password: String(x.password || ""),
           totpSecret: String(x.totpSecret || ""),
           securityCodes: Array.isArray(x.securityCodes)
-            ? x.securityCodes
-                .map((sc) =>
+            ? (x.securityCodes as unknown[])
+                .map((sc: unknown) =>
                   typeof sc === "string"
                     ? sc
-                    : sc && typeof sc === "object" && typeof (sc as Record<string, unknown>).code === "string"
+                    : sc &&
+                        typeof sc === "object" &&
+                        typeof (sc as Record<string, unknown>).code === "string"
                       ? {
                           code: String((sc as Record<string, unknown>).code),
                           used: Boolean((sc as Record<string, unknown>).used),
                         }
                       : null
                 )
-                .filter(Boolean)
+                .filter(
+                  (
+                    item: string | { code: string; used: boolean } | null
+                  ): item is string | { code: string; used: boolean } =>
+                    item !== null
+                )
             : [],
           notes: String(x.notes || ""),
           favorite: Boolean(x.favorite),
@@ -411,6 +431,7 @@ export async function POST(req: Request) {
 
     docsToInsert.push({
       ownerUserId: ctx.userId,
+      entryType: d.entryType,
       domainKey: row.domainKey,
       appName: row.appName,
       label: d.label.trim() || row.appName,
@@ -439,6 +460,7 @@ export async function POST(req: Request) {
       favorite: Boolean(d.favorite),
       keyFingerprint,
       ...(storeHex ? { hexcode: activeHex } : {}),
+      deletedAt: null,
       createdAt: now,
       updatedAt: now,
     });

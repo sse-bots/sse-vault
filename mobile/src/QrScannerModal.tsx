@@ -50,7 +50,7 @@ export function extractMobileTotpFromQr(raw: string): ScannedTotpResult | null {
  */
 export async function pickAndDecodeQrImage(): Promise<ScannedTotpResult | null> {
   const res = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: ImagePicker.MediaTypeOptions.Images,
+    mediaTypes: ["images"],
     allowsEditing: false,
     quality: 1,
   });
@@ -181,7 +181,10 @@ export function QrScannerModal({
               pointerEvents="none"
               style={{
                 position: "absolute",
-                inset: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+                left: 0,
                 alignItems: "center",
                 justifyContent: "center",
               }}

@@ -136,8 +136,7 @@ export function sha256(msg: Uint8Array): Uint8Array {
   return out;
 }
 
-export function hmac(hash: (m: Uint8Array) => Uint8Array, key: Uint8Array, msg: Uint8Array): Uint8Array {
-  const block = 64;
+export function hmac(hash: (m: Uint8Array) => Uint8Array, key: Uint8Array, msg: Uint8Array, block = 64): Uint8Array {
   let k = key.length > block ? hash(key) : key;
   const kp = new Uint8Array(block);
   kp.set(k);
@@ -158,7 +157,13 @@ export function generateTotp(cfg: TotpConfig, nowMs = Date.now()): string {
   const dv = new DataView(msg.buffer);
   dv.setUint32(0, Math.floor(counter / 0x100000000));
   dv.setUint32(4, counter >>> 0);
-  const mac = hmac(cfg.algorithm === "SHA256" ? sha256 : sha1, b32decode(cfg.secret), msg);
+  const secretBytes = b32decode(cfg.secret);
+  const mac =
+    cfg.algorithm === "SHA512"
+      ? hmac(sha512, secretBytes, msg, 128)
+      : cfg.algorithm === "SHA256"
+        ? hmac(sha256, secretBytes, msg, 64)
+        : hmac(sha1, secretBytes, msg, 64);
   const off = mac[mac.length - 1] & 15;
   const bin =
     ((mac[off] & 0x7f) << 24) | (mac[off + 1] << 16) | (mac[off + 2] << 8) | mac[off + 3];
