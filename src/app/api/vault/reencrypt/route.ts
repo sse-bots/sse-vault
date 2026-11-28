@@ -12,6 +12,7 @@ import {
   shouldStoreHexcodeInDb,
 } from "@/lib/crypto";
 import type { StoredSecurityCode } from "@/lib/vault-types";
+import { logVaultActivity } from "@/lib/activity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -152,6 +153,14 @@ export async function POST(req: Request) {
       await vaultItems.updateOne({ _id: doc._id }, { $set: updates });
       migratedCount += 1;
     }
+  }
+
+  if (migratedCount > 0) {
+    await logVaultActivity(
+      ctx.userId,
+      "reencrypt",
+      `Re-encrypted ${migratedCount} entry(ies) with active key`
+    );
   }
 
   return NextResponse.json({

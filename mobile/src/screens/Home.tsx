@@ -9,6 +9,8 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { Alert } from "react-native";
+import { api } from "../api";
 import { useVault, type AppGroup } from "../vault";
 import { useAuth } from "../auth";
 import { usePrefs } from "../prefs";
@@ -17,7 +19,7 @@ import { Banner, Chip, Empty, SiteIcon, StatBox } from "../ui";
 import { UpdateNotice } from "../Update";
 import { c, radius } from "../theme";
 
-type AppFilter = "all" | "oauth" | "totp" | "keys" | "favorites";
+type AppFilter = "all" | "oauth" | "totp" | "keys" | "notes" | "cards" | "favorites";
 type SortMode = "favorites" | "accounts" | "recent" | "az";
 
 const SORT_CYCLE: { id: SortMode; label: string }[] = [
@@ -32,12 +34,14 @@ export default function Home({
   onAdd,
   onSecurity,
   onAuthTab,
+  onTrash,
 }: {
   onOpen: (id: string) => void;
   onOpenGroup: (domainKey: string) => void;
   onAdd: () => void;
   onSecurity: () => void;
   onAuthTab: () => void;
+  onTrash: () => void;
 }) {
   const { items, groups, loading, error, refresh } = useVault();
   const { user, offline } = useAuth();
@@ -48,6 +52,8 @@ export default function Home({
   const [cat, setCat] = useState<Category | "all">("all");
   const [sortBy, setSortBy] = useState<SortMode>("favorites");
   const [compact, setCompact] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedDomains, setSelectedDomains] = useState<string[]>([]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -59,6 +65,8 @@ export default function Home({
         return false;
       if (filter === "keys" && !its.some((i) => i.securityCodes.length > 0))
         return false;
+      if (filter === "notes" && !its.some((i) => i.entryType === "note")) return false;
+      if (filter === "cards" && !its.some((i) => i.entryType === "card")) return false;
       if (filter === "favorites" && !its.some((i) => i.favorite)) return false;
       if (cat !== "all" && !its.some((i) => i.category === cat)) return false;
       if (!needle) return true;
@@ -262,6 +270,8 @@ export default function Home({
               { id: "oauth", label: "OAuth" },
               { id: "totp", label: "TOTP" },
               { id: "keys", label: "Keys" },
+              { id: "notes", label: "Notes" },
+              { id: "cards", label: "Cards" },
               { id: "favorites", label: "Favorites" },
             ] as const
           ).map((t) => {
@@ -334,7 +344,107 @@ export default function Home({
             {compact ? "Cards" : "Compact"}
           </Text>
         </Pressable>
+
+        {!offline && (
+          <>
+            <Pressable
+              onPress={() => {
+                setSelectMode((v) => !v);
+                setSelectedDomains([]);
+              }}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 5,
+                backgroundColor: selectMode ? c.accentSoft : c.card,
+                borderWidth: 1,
+                borderColor: selectMode ? c.accent : c.borderStrong,
+                borderRadius: 999,
+                paddingHorizontal: 11,
+                paddingVertical: 7,
+              }}
+            >
+              <Ionicons name="checkbox-outline" size={13} color={c.accentLabel} />
+              <Text style={{ color: selectMode ? c.accentLabel : c.muted, fontSize: 11, fontWeight: "700" }}>
+                {selectMode ? "Done" : "Select"}
+              </Text>
+            </Pressable>
+
+            <Pressable
+              onPress={onTrash}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 5,
+                backgroundColor: c.card,
+                borderWidth: 1,
+                borderColor: c.borderStrong,
+                borderRadius: 999,
+                paddingHorizontal: 11,
+                paddingVertical: 7,
+              }}
+            >
+              <Ionicons name="trash-outline" size={13} color={c.danger} />
+              <Text style={{ color: c.muted, fontSize: 11, fontWeight: "700" }}>
+                Trash
+              </Text>
+            </Pressable>
+          </>
+        )}
       </ScrollView>
+
+      {selectMode && (
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            backgroundColor: c.card,
+            borderWidth: 1,
+            borderColor: c.accentBorder,
+            borderRadius: radius.lg,
+            paddingHorizontal: 12,
+            paddingVertical: 10,
+            marginTop: 8,
+            gap: 8,
+          }}
+        >
+          <Text style={{ color: c.text, fontSize: 12, fontWeight: "800" }}>
+            {selectedDomains.length} selected
+          </Text>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <Pressable
+              disabled={selectedDomains.length === 0}
+              onPress={() => {
+                const ids = items.filter((i) => selectedDomains.includes(i.domainKey)).map((i) => i.id);
+                if (!ids.length) return;
+                Alert.alert("Move to Trash?", `Move ${ids.length} account(s) to the 30-day Trash Bin?`, [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Move to Trash",
+                    style: "destructive",
+                    onPress: async () => {
+                      await api.bulk({ action: "trash", ids });
+                      setSelectedDomains([]);
+                      setSelectMode(false);
+                      await refresh();
+                    },
+                  },
+                ]);
+              }}
+              style={{
+                backgroundColor: c.danger + "22",
+                paddingHorizontal: 10,
+                paddingVertical: 6,
+                borderRadius: radius.sm,
+                opacity: selectedDomains.length === 0 ? 0.4 : 1,
+              }}
+            >
+              <Text style={{ color: c.danger, fontSize: 11, fontWeight: "800" }}>Trash Selected</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
 
       {/* Category Filter Pills */}
       <ScrollView
@@ -406,13 +516,19 @@ export default function Home({
             group={g}
             compact={compact}
             privacyBlur={privacyBlur}
-            onPress={() => onOpenGroup(g.domainKey)}
+            onPress={() => {
+              if (!selectMode) return onOpenGroup(g.domainKey);
+              setSelectedDomains((prev) =>
+                prev.includes(g.domainKey)
+                  ? prev.filter((d) => d !== g.domainKey)
+                  : [...prev, g.domainKey]
+              );
+            }}
           />
         )}
       />
 
-      {!offline && (
-        <Pressable
+      <Pressable
           onPress={onAdd}
           style={({ pressed }) => ({
             position: "absolute",
@@ -430,7 +546,6 @@ export default function Home({
         >
           <Ionicons name="add" size={28} color={c.accentText} />
         </Pressable>
-      )}
     </View>
   );
 }

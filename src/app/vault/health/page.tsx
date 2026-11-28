@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -8,6 +8,8 @@ import {
   CheckCircle2,
   Copy,
   Download,
+  Flame,
+  Loader2,
   KeyRound,
   Lock,
   LogIn,
@@ -23,6 +25,38 @@ import type { VaultItemDTO } from "@/lib/vault-types";
 
 export default function VaultHealthPage() {
   const { user, authLoading, items, lockedCount, recoveredCount } = useVault();
+  const [checkingBreaches, setCheckingBreaches] = useState(false);
+  const [breachResult, setBreachResult] = useState<{
+    checkedCount: number;
+    compromised: Array<{ id: string; count: number }>;
+    checkedAt: string;
+  } | null>(null);
+  const [breachError, setBreachError] = useState<string | null>(null);
+
+  async function runBreachCheck() {
+    setCheckingBreaches(true);
+    setBreachError(null);
+    try {
+      const res = await fetch("/api/vault/breach-check", {
+        method: "POST",
+        credentials: "include",
+      });
+      const j = await res.json();
+      if (!res.ok) {
+        setBreachError(j.error || "Could not check password breaches.");
+        return;
+      }
+      setBreachResult({
+        checkedCount: j.checkedCount || 0,
+        compromised: j.compromised || [],
+        checkedAt: j.checkedAt || new Date().toISOString(),
+      });
+    } catch {
+      setBreachError("Network error while checking HIBP.");
+    } finally {
+      setCheckingBreaches(false);
+    }
+  }
 
   const audit = useMemo(() => {
     const weakPasswords: VaultItemDTO[] = [];
@@ -159,14 +193,84 @@ export default function VaultHealthPage() {
           </div>
         </div>
 
-        <a
-          href="/api/vault/export"
-          className="vault-inset vault-text-primary inline-flex w-full shrink-0 items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-xs font-bold transition hover:border-amber-500 sm:w-auto"
-        >
-          <Download className="h-4 w-4 text-amber-500" />
-          Export JSON Backup
-        </a>
+        <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto">
+          <button
+            type="button"
+            disabled={checkingBreaches}
+            onClick={runBreachCheck}
+            className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl bg-amber-500 px-4 py-2.5 text-xs font-extrabold text-zinc-950 shadow-md shadow-amber-500/20 hover:bg-amber-400 disabled:opacity-50 sm:flex-none"
+          >
+            {checkingBreaches ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Flame className="h-4 w-4" />
+            )}
+            Check Breaches (HIBP)
+          </button>
+          <a
+            href="/api/vault/export"
+            className="vault-inset vault-text-primary inline-flex flex-1 items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-xs font-bold transition hover:border-amber-500 sm:flex-none"
+          >
+            <Download className="h-4 w-4 text-amber-500" />
+            Export JSON
+          </a>
+        </div>
       </section>
+
+      {/* HIBP Data Breach Results Panel */}
+      {(breachError || breachResult) && (
+        <section className="vault-card space-y-3 rounded-3xl border-rose-500/35 p-5">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="flex items-center gap-2 text-sm font-extrabold text-rose-500">
+              <Flame className="h-4 w-4" />
+              Have I Been Pwned · K-Anonymity Check
+            </h2>
+            {breachResult && (
+              <span className="vault-text-muted font-mono text-[10px]">
+                Checked {breachResult.checkedCount} password(s)
+              </span>
+            )}
+          </div>
+          {breachError ? (
+            <p className="text-xs text-rose-400">{breachError}</p>
+          ) : breachResult && breachResult.compromised.length === 0 ? (
+            <div className="flex items-center gap-2 rounded-2xl border border-emerald-500/35 bg-emerald-500/10 p-3 text-xs font-semibold text-emerald-500">
+              <CheckCircle2 className="h-4 w-4 shrink-0" />
+              None of your {breachResult.checkedCount} checked passwords appeared in known data breaches.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-xs text-rose-400">
+                {breachResult?.compromised.length} password(s) found in public data breaches — change them immediately:
+              </p>
+              {breachResult?.compromised.map((c) => {
+                const it = items.find((x) => x.id === c.id);
+                if (!it) return null;
+                return (
+                  <Link
+                    key={c.id}
+                    href={`/vault/${encodeURIComponent(it.domainKey)}`}
+                    className="vault-inset flex items-center justify-between gap-3 rounded-2xl p-3 text-xs transition hover:border-rose-500"
+                  >
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <SiteIcon domainOrUrl={it.domainKey} label={it.appName} size="sm" />
+                      <div className="min-w-0">
+                        <div className="vault-text-primary truncate font-bold">{it.label}</div>
+                        <div className="vault-text-muted truncate font-mono text-[10px]">
+                          {it.email || it.username || it.domainKey}
+                        </div>
+                      </div>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-rose-500/15 px-2.5 py-0.5 font-mono text-[10px] font-extrabold text-rose-400">
+                      Seen {c.count.toLocaleString()}×
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* 4 Mobile-Safe Summary Counters */}
       <section className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 sm:gap-3">

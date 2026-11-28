@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { getSession } from "@/lib/auth";
 import { getVaultSession } from "@/lib/session";
 import { getVaultCollections } from "@/lib/mongodb";
 import {
@@ -13,11 +14,13 @@ import {
   sanitizeAutoLockMinutes,
   verifyVaultPinHash,
 } from "@/lib/vault-pin";
+import { logVaultActivity } from "@/lib/activity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const NO_CACHE = { "Cache-Control": "no-store" };
+const RESET_WINDOW_MS = 10 * 60 * 1000;
 
 const sixDigitSchema = z
   .string()
@@ -41,6 +44,11 @@ const pinActionSchema = z.discriminatedUnion("action", [
     confirmPin: sixDigitSchema,
   }),
   z.object({
+    action: z.literal("reset"),
+    newPin: sixDigitSchema,
+    confirmPin: sixDigitSchema,
+  }),
+  z.object({
     action: z.literal("lock"),
   }),
   z.object({
@@ -58,7 +66,12 @@ export async function GET() {
     );
   }
   const pinStatus = await getVaultPinStatus(ctx.userId);
-  return NextResponse.json({ pinStatus }, { headers: NO_CACHE });
+  const rawSess = await getSession();
+  const canResetPin = Boolean(
+    rawSess?.pinResetFreshAt &&
+      Date.now() - rawSess.pinResetFreshAt <= RESET_WINDOW_MS
+  );
+  return NextResponse.json({ pinStatus, canResetPin }, { headers: NO_CACHE });
 }
 
 export async function POST(req: Request) {
@@ -82,7 +95,6 @@ export async function POST(req: Request) {
   const { vaultPinConfigs } = await getVaultCollections();
   const data = parsed.data;
 
-  // 1. LOCK VAULT IMMEDIATELY
   if (data.action === "lock") {
     const res = NextResponse.json(
       { ok: true, unlocked: false },
@@ -94,17 +106,16 @@ export async function POST(req: Request) {
 
   const existing = await vaultPinConfigs.findOne({ ownerUserId: ctx.userId });
 
-  // 2. INITIAL 6-DIGIT PIN SETUP
   if (data.action === "setup") {
     if (existing?.pinHash) {
       return NextResponse.json(
-        { error: "A 6-digit Vault PIN is already configured." },
+        { error: "Vault PIN is already set. Use Change PIN or Forgot PIN." },
         { status: 409, headers: NO_CACHE }
       );
     }
     if (data.pin !== data.confirmPin) {
       return NextResponse.json(
-        { error: "The two 6-digit PINs do not match." },
+        { error: "PINs do not match." },
         { status: 400, headers: NO_CACHE }
       );
     }
@@ -112,6 +123,7 @@ export async function POST(req: Request) {
     const { hash, salt } = hashVaultPin(data.pin);
     const now = new Date();
     const autoLockMinutes = 30;
+    const pinVersion = 1;
 
     await vaultPinConfigs.updateOne(
       { ownerUserId: ctx.userId },
@@ -120,7 +132,7 @@ export async function POST(req: Request) {
           ownerUserId: ctx.userId,
           pinHash: hash,
           pinSalt: salt,
-          pinVersion: 1,
+          pinVersion,
           autoLockMinutes,
           failedAttempts: 0,
           lockedUntil: null,
@@ -131,34 +143,111 @@ export async function POST(req: Request) {
       { upsert: true }
     );
 
-    let res = NextResponse.json(
-      {
-        ok: true,
-        pinStatus: {
-          hasPin: true,
-          unlocked: true,
-          autoLockMinutes,
-          failedAttempts: 0,
-          lockedUntil: null,
-        },
-      },
-      { headers: NO_CACHE }
-    );
+    await logVaultActivity(ctx.userId, "pin_setup", "Set up 6-digit Vault PIN");
+
     const nativeToken = await nativePinTokenFor({
       userId: ctx.userId,
-      pinVersion: 1,
-      autoLockMinutes: autoLockMinutes,
+      pinVersion,
+      autoLockMinutes,
     });
-    const resJson = await res.clone().json();
-    const out = NextResponse.json(
+    const resJson = {
+      ok: true,
+      pinStatus: {
+        hasPin: true,
+        unlocked: true,
+        autoLockMinutes,
+        failedAttempts: 0,
+        lockedUntil: null,
+      },
+    };
+    const res = NextResponse.json(
       nativeToken ? { ...resJson, pinToken: nativeToken } : resJson,
       { headers: NO_CACHE }
     );
-    res.cookies.getAll().forEach((c) => out.cookies.set(c));
-    res = out;
     applyPinUnlockCookie(res, {
       userId: ctx.userId,
-      pinVersion: 1,
+      pinVersion,
+      autoLockMinutes,
+    });
+    return res;
+  }
+
+  if (data.action === "reset") {
+    const rawSess = await getSession();
+    const fresh = Boolean(
+      rawSess?.pinResetFreshAt &&
+        Date.now() - rawSess.pinResetFreshAt <= RESET_WINDOW_MS
+    );
+    if (!fresh) {
+      return NextResponse.json(
+        {
+          error:
+            "Fresh SSE Accounts verification required to reset your Vault PIN.",
+          requiresReauth: true,
+        },
+        { status: 403, headers: NO_CACHE }
+      );
+    }
+    if (data.newPin !== data.confirmPin) {
+      return NextResponse.json(
+        { error: "New PINs do not match." },
+        { status: 400, headers: NO_CACHE }
+      );
+    }
+
+    const { hash, salt } = hashVaultPin(data.newPin);
+    const nextVersion = Number(existing?.pinVersion || 0) + 1;
+    const autoLockMinutes = sanitizeAutoLockMinutes(
+      existing?.autoLockMinutes ?? 30
+    );
+    const now = new Date();
+
+    await vaultPinConfigs.updateOne(
+      { ownerUserId: ctx.userId },
+      {
+        $set: {
+          ownerUserId: ctx.userId,
+          pinHash: hash,
+          pinSalt: salt,
+          pinVersion: nextVersion,
+          autoLockMinutes,
+          failedAttempts: 0,
+          lockedUntil: null,
+          updatedAt: now,
+        },
+        $setOnInsert: { createdAt: now },
+      },
+      { upsert: true }
+    );
+
+    await logVaultActivity(
+      ctx.userId,
+      "pin_reset",
+      "Reset 6-digit Vault PIN via SSE Accounts re-authentication"
+    );
+
+    const nativeToken = await nativePinTokenFor({
+      userId: ctx.userId,
+      pinVersion: nextVersion,
+      autoLockMinutes,
+    });
+    const resJson = {
+      ok: true,
+      pinStatus: {
+        hasPin: true,
+        unlocked: true,
+        autoLockMinutes,
+        failedAttempts: 0,
+        lockedUntil: null,
+      },
+    };
+    const res = NextResponse.json(
+      nativeToken ? { ...resJson, pinToken: nativeToken } : resJson,
+      { headers: NO_CACHE }
+    );
+    applyPinUnlockCookie(res, {
+      userId: ctx.userId,
+      pinVersion: nextVersion,
       autoLockMinutes,
     });
     return res;
@@ -166,43 +255,40 @@ export async function POST(req: Request) {
 
   if (!existing?.pinHash || !existing?.pinSalt) {
     return NextResponse.json(
-      { error: "You must create a 6-digit Vault PIN first." },
+      { error: "Please set up your 6-digit Vault PIN first." },
       { status: 400, headers: NO_CACHE }
     );
   }
 
-  const pinVersion = Number(existing.pinVersion || 1);
-  const autoLockMinutes = sanitizeAutoLockMinutes(
-    existing.autoLockMinutes ?? 30
-  );
+  const lockedUntil = existing.lockedUntil
+    ? new Date(existing.lockedUntil as string | Date)
+    : null;
+  if (
+    (data.action === "verify" || data.action === "change") &&
+    lockedUntil &&
+    lockedUntil.getTime() > Date.now()
+  ) {
+    const secs = Math.ceil((lockedUntil.getTime() - Date.now()) / 1000);
+    return NextResponse.json(
+      {
+        error: `Too many wrong attempts. Try again in ${secs}s.`,
+        lockedUntil: lockedUntil.toISOString(),
+      },
+      { status: 429, headers: NO_CACHE }
+    );
+  }
 
-  // 3. VERIFY 6-DIGIT PIN TO UNLOCK VAULT
   if (data.action === "verify") {
-    const lockedUntil = existing.lockedUntil
-      ? new Date(existing.lockedUntil as string | Date)
-      : null;
-
-    if (lockedUntil && lockedUntil.getTime() > Date.now()) {
-      const waitSec = Math.ceil((lockedUntil.getTime() - Date.now()) / 1000);
-      return NextResponse.json(
-        {
-          error: `Too many wrong PIN attempts. Try again in ${waitSec}s.`,
-          lockedUntil: lockedUntil.toISOString(),
-        },
-        { status: 429, headers: NO_CACHE }
-      );
-    }
-
-    const valid = verifyVaultPinHash(
+    const ok = verifyVaultPinHash(
       data.pin,
       String(existing.pinHash),
       String(existing.pinSalt)
     );
 
-    if (!valid) {
+    if (!ok) {
       const nextFails = Number(existing.failedAttempts || 0) + 1;
-      const shouldLockout = nextFails >= MAX_FAILED_ATTEMPTS;
-      const nextLockUntil = shouldLockout
+      const shouldLock = nextFails >= MAX_FAILED_ATTEMPTS;
+      const nextLockedUntil = shouldLock
         ? new Date(Date.now() + LOCKOUT_MS)
         : null;
 
@@ -210,23 +296,30 @@ export async function POST(req: Request) {
         { ownerUserId: ctx.userId },
         {
           $set: {
-            failedAttempts: shouldLockout ? 0 : nextFails,
-            lockedUntil: nextLockUntil,
+            failedAttempts: shouldLock ? 0 : nextFails,
+            lockedUntil: nextLockedUntil,
             updatedAt: new Date(),
           },
         }
       );
 
+      await logVaultActivity(
+        ctx.userId,
+        "pin_failed",
+        shouldLock
+          ? "Vault PIN lockout triggered after 5 failed attempts"
+          : `Failed Vault PIN attempt (${nextFails}/${MAX_FAILED_ATTEMPTS})`
+      );
+
       return NextResponse.json(
         {
-          error: shouldLockout
-            ? "Too many incorrect attempts. Vault PIN entry paused for 2 minutes."
-            : `Incorrect 6-digit PIN (${MAX_FAILED_ATTEMPTS - nextFails} attempt${
-                MAX_FAILED_ATTEMPTS - nextFails === 1 ? "" : "s"
-              } left).`,
-          lockedUntil: nextLockUntil ? nextLockUntil.toISOString() : null,
+          error: shouldLock
+            ? "Too many incorrect PINs. Vault locked for 2 minutes."
+            : `Incorrect PIN. ${MAX_FAILED_ATTEMPTS - nextFails} attempt(s) remaining.`,
+          failedAttempts: shouldLock ? MAX_FAILED_ATTEMPTS : nextFails,
+          lockedUntil: nextLockedUntil ? nextLockedUntil.toISOString() : null,
         },
-        { status: 401, headers: NO_CACHE }
+        { status: shouldLock ? 429 : 401, headers: NO_CACHE }
       );
     }
 
@@ -236,36 +329,37 @@ export async function POST(req: Request) {
         $set: {
           failedAttempts: 0,
           lockedUntil: null,
-          updatedAt: new Date(),
+          lastUnlockedAt: new Date(),
         },
       }
     );
 
-    let res = NextResponse.json(
-      {
-        ok: true,
-        pinStatus: {
-          hasPin: true,
-          unlocked: true,
-          autoLockMinutes,
-          failedAttempts: 0,
-          lockedUntil: null,
-        },
-      },
-      { headers: NO_CACHE }
+    await logVaultActivity(ctx.userId, "pin_unlock", "Unlocked vault with PIN");
+
+    const pinVersion = Number(existing.pinVersion || 1);
+    const autoLockMinutes = sanitizeAutoLockMinutes(
+      existing.autoLockMinutes ?? 30
     );
+
     const nativeToken = await nativePinTokenFor({
       userId: ctx.userId,
-      pinVersion: pinVersion,
-      autoLockMinutes: autoLockMinutes,
+      pinVersion,
+      autoLockMinutes,
     });
-    const resJson = await res.clone().json();
-    const out = NextResponse.json(
+    const resJson = {
+      ok: true,
+      pinStatus: {
+        hasPin: true,
+        unlocked: true,
+        autoLockMinutes,
+        failedAttempts: 0,
+        lockedUntil: null,
+      },
+    };
+    const res = NextResponse.json(
       nativeToken ? { ...resJson, pinToken: nativeToken } : resJson,
       { headers: NO_CACHE }
     );
-    res.cookies.getAll().forEach((c) => out.cookies.set(c));
-    res = out;
     applyPinUnlockCookie(res, {
       userId: ctx.userId,
       pinVersion,
@@ -274,14 +368,13 @@ export async function POST(req: Request) {
     return res;
   }
 
-  // 4. CHANGE EXISTING 6-DIGIT PIN (Requires current PIN & invalidates other sessions)
   if (data.action === "change") {
-    const valid = verifyVaultPinHash(
+    const ok = verifyVaultPinHash(
       data.currentPin,
       String(existing.pinHash),
       String(existing.pinSalt)
     );
-    if (!valid) {
+    if (!ok) {
       return NextResponse.json(
         { error: "Current 6-digit PIN is incorrect." },
         { status: 401, headers: NO_CACHE }
@@ -289,7 +382,7 @@ export async function POST(req: Request) {
     }
     if (data.newPin !== data.confirmPin) {
       return NextResponse.json(
-        { error: "New PIN and confirmation do not match." },
+        { error: "New PINs do not match." },
         { status: 400, headers: NO_CACHE }
       );
     }
@@ -301,7 +394,10 @@ export async function POST(req: Request) {
     }
 
     const { hash, salt } = hashVaultPin(data.newPin);
-    const nextVersion = pinVersion + 1;
+    const nextVersion = Number(existing.pinVersion || 1) + 1;
+    const autoLockMinutes = sanitizeAutoLockMinutes(
+      existing.autoLockMinutes ?? 30
+    );
 
     await vaultPinConfigs.updateOne(
       { ownerUserId: ctx.userId },
@@ -317,31 +413,27 @@ export async function POST(req: Request) {
       }
     );
 
-    let res = NextResponse.json(
-      {
-        ok: true,
-        pinStatus: {
-          hasPin: true,
-          unlocked: true,
-          autoLockMinutes,
-          failedAttempts: 0,
-          lockedUntil: null,
-        },
-      },
-      { headers: NO_CACHE }
-    );
+    await logVaultActivity(ctx.userId, "pin_change", "Changed 6-digit Vault PIN");
+
     const nativeToken = await nativePinTokenFor({
       userId: ctx.userId,
       pinVersion: nextVersion,
-      autoLockMinutes: autoLockMinutes,
+      autoLockMinutes,
     });
-    const resJson = await res.clone().json();
-    const out = NextResponse.json(
+    const resJson = {
+      ok: true,
+      pinStatus: {
+        hasPin: true,
+        unlocked: true,
+        autoLockMinutes,
+        failedAttempts: 0,
+        lockedUntil: null,
+      },
+    };
+    const res = NextResponse.json(
       nativeToken ? { ...resJson, pinToken: nativeToken } : resJson,
       { headers: NO_CACHE }
     );
-    res.cookies.getAll().forEach((c) => out.cookies.set(c));
-    res = out;
     applyPinUnlockCookie(res, {
       userId: ctx.userId,
       pinVersion: nextVersion,
@@ -350,54 +442,50 @@ export async function POST(req: Request) {
     return res;
   }
 
-  // 5. UPDATE AUTO-LOCK TIMEOUT PREFERENCE
   if (data.action === "preferences") {
-    const currentStatus = await getVaultPinStatus(ctx.userId);
-    if (!currentStatus.unlocked) {
+    const status = await getVaultPinStatus(ctx.userId);
+    if (!status.unlocked) {
       return NextResponse.json(
-        { error: "Unlock your vault first." },
+        { error: "Unlock your vault first to change security preferences." },
         { status: 423, headers: NO_CACHE }
       );
     }
-
-    const nextAutoLock = sanitizeAutoLockMinutes(data.autoLockMinutes);
+    const autoLockMinutes = sanitizeAutoLockMinutes(data.autoLockMinutes);
     await vaultPinConfigs.updateOne(
       { ownerUserId: ctx.userId },
-      { $set: { autoLockMinutes: nextAutoLock, updatedAt: new Date() } }
+      { $set: { autoLockMinutes, updatedAt: new Date() } }
     );
 
-    let res = NextResponse.json(
-      {
-        ok: true,
-        pinStatus: {
-          ...currentStatus,
-          autoLockMinutes: nextAutoLock,
-        },
-      },
-      { headers: NO_CACHE }
-    );
+    const pinVersion = Number(existing.pinVersion || 1);
     const nativeToken = await nativePinTokenFor({
       userId: ctx.userId,
-      pinVersion: pinVersion,
-      autoLockMinutes: nextAutoLock,
+      pinVersion,
+      autoLockMinutes,
     });
-    const resJson = await res.clone().json();
-    const out = NextResponse.json(
+    const resJson = {
+      ok: true,
+      pinStatus: {
+        hasPin: true,
+        unlocked: true,
+        autoLockMinutes,
+        failedAttempts: 0,
+        lockedUntil: null,
+      },
+    };
+    const res = NextResponse.json(
       nativeToken ? { ...resJson, pinToken: nativeToken } : resJson,
       { headers: NO_CACHE }
     );
-    res.cookies.getAll().forEach((c) => out.cookies.set(c));
-    res = out;
     applyPinUnlockCookie(res, {
       userId: ctx.userId,
       pinVersion,
-      autoLockMinutes: nextAutoLock,
+      autoLockMinutes,
     });
     return res;
   }
 
   return NextResponse.json(
-    { error: "Unsupported action." },
+    { error: "Unsupported PIN action." },
     { status: 400, headers: NO_CACHE }
   );
 }

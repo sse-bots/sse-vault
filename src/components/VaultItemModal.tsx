@@ -5,6 +5,11 @@ import {
   AlertTriangle,
   Check,
   CheckCircle2,
+  CreditCard,
+  ImageUp,
+  Layers,
+  StickyNote,
+  Trash2,
   Eye,
   EyeOff,
   FileText,
@@ -38,6 +43,7 @@ import {
   isUrlAllowedForDomain,
 } from "@/lib/domain";
 import { extractSecurityCodesFromText } from "@/lib/parse-codes";
+import { decodeQrFromImageFile, extractTotpFromQrText } from "@/lib/qr-decode";
 import {
   buildOAuthProviderCatalog,
   findParentOAuthAccount,
@@ -46,7 +52,10 @@ import {
 import {
   VAULT_CATEGORIES,
   type VaultAuthType,
+  type VaultCardDetailsDTO,
   type VaultCategory,
+  type VaultCustomFieldDTO,
+  type VaultEntryType,
   type VaultItemDTO,
 } from "@/lib/vault-types";
 
@@ -67,6 +76,7 @@ export function VaultItemModal() {
   const isEdit = Boolean(initialItem);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const qrInputRef = useRef<HTMLInputElement | null>(null);
 
   // Resolve initial linked parent account if editing an OAuth entry or opened via "+ Connect Website"
   const initialResolvedParent = useMemo(() => {
@@ -88,6 +98,24 @@ export function VaultItemModal() {
     }
     return "google.com";
   }, [presetParent, initialItem, initialResolvedParent]);
+
+  const [entryType, setEntryType] = useState<VaultEntryType>(
+    initialItem?.entryType || "login"
+  );
+  const [cardDetails, setCardDetails] = useState<VaultCardDetailsDTO>(
+    initialItem?.cardDetails || {
+      cardholderName: "",
+      cardNumber: "",
+      expiry: "",
+      cvv: "",
+      billingZip: "",
+    }
+  );
+  const [customFields, setCustomFields] = useState<VaultCustomFieldDTO[]>(
+    initialItem?.customFields || []
+  );
+  const [qrStatus, setQrStatus] = useState<string | null>(null);
+  const [decodingQr, setDecodingQr] = useState(false);
 
   const [url, setUrl] = useState(
     initialItem?.url || (lockedDomain ? `https://${lockedDomain}` : "")
@@ -323,6 +351,48 @@ export function VaultItemModal() {
     }
   }
 
+  async function handleQrImageUpload(file: File) {
+    setError(null);
+    setQrStatus(null);
+    if (file.size > 8 * 1024 * 1024) {
+      setError("Please pick a QR image smaller than 8 MB.");
+      return;
+    }
+    setDecodingQr(true);
+    try {
+      const raw = await decodeQrFromImageFile(file);
+      if (!raw) {
+        setError("No QR code detected in that image. Try cropping closer to the QR code.");
+        return;
+      }
+      const parsed = extractTotpFromQrText(raw);
+      if (!parsed) {
+        setError("QR code decoded, but it does not contain a valid TOTP secret or otpauth:// URI.");
+        return;
+      }
+      setTotpSecret(parsed.secretOrUri);
+      if (parsed.issuer && !label.trim()) setLabel(parsed.issuer);
+      if (parsed.account && !email.trim() && parsed.account.includes("@")) {
+        setEmail(parsed.account);
+      }
+      setQrStatus(
+        `Decoded TOTP from "${file.name}" in browser memory — image discarded.`
+      );
+    } catch {
+      setError("Could not decode that image file.");
+    } finally {
+      setDecodingQr(false);
+      if (qrInputRef.current) qrInputRef.current.value = "";
+    }
+  }
+
+  function addCustomField() {
+    setCustomFields((prev) => [
+      ...prev,
+      { id: `cf_${Date.now()}_${prev.length}`, label: "", value: "", hidden: true },
+    ]);
+  }
+
   async function processTxtFile(file: File) {
     setError(null);
     if (file.size > 512 * 1024) {
@@ -373,7 +443,7 @@ export function VaultItemModal() {
       linkedAccountObj?.username ||
       "";
 
-    if (authType === "oauth" && !resolvedOAuthEmail) {
+    if (entryType === "login" && authType === "oauth" && !resolvedOAuthEmail) {
       setError(
         "Select an existing provider account or enter the email used for OAuth sign-in."
       );
@@ -414,10 +484,21 @@ export function VaultItemModal() {
       const endpoint = isEdit ? `/api/vault/${initialItem!.id}` : "/api/vault";
       const method = isEdit ? "PATCH" : "POST";
 
+      const resolvedUrl =
+        entryType === "login"
+          ? url
+          : url.trim() ||
+            (entryType === "note"
+              ? "https://secure-note.local"
+              : "https://payment-cards.local");
+
       const payload = {
+        entryType,
         label,
-        url,
-        expectedDomain: lockedDomain || undefined,
+        url: resolvedUrl,
+        expectedDomain: entryType === "login" ? lockedDomain || undefined : undefined,
+        customFields: customFields.filter((f) => f.label.trim() || f.value.trim()),
+        cardDetails: entryType === "card" ? cardDetails : null,
         authType,
         oauthProvider: authType === "oauth" ? resolvedOAuthProvider : "",
         oauthProviderDomain: authType === "oauth" ? resolvedOAuthDomain : "",
@@ -523,6 +604,37 @@ export function VaultItemModal() {
             </div>
           )}
 
+          {/* 0. Entry Type Switcher (Login | Secure Note | Payment Card) */}
+          {!lockedDomain && !presetParent && (
+            <div className="vault-inset grid grid-cols-3 gap-1.5 rounded-2xl p-1.5">
+              {(
+                [
+                  { id: "login", label: "Login", icon: Globe },
+                  { id: "note", label: "Secure Note", icon: StickyNote },
+                  { id: "card", label: "Card", icon: CreditCard },
+                ] as const
+              ).map((t) => {
+                const Icon = t.icon;
+                const active = entryType === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setEntryType(t.id)}
+                    className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-bold transition ${
+                      active
+                        ? "bg-amber-500 text-zinc-950 shadow-sm"
+                        : "vault-text-secondary hover:text-amber-500"
+                    }`}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {/* 1. Website URL + Account Label */}
           <div className="space-y-2">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -540,7 +652,7 @@ export function VaultItemModal() {
                 <div className="relative">
                   <Globe className="vault-text-muted pointer-events-none absolute left-3 top-2.5 h-4 w-4" />
                   <input
-                    required
+                    required={entryType === "login"}
                     value={url}
                     onChange={(e) => setUrl(e.target.value)}
                     placeholder={
@@ -606,7 +718,88 @@ export function VaultItemModal() {
             ) : null}
           </div>
 
+          {/* Card Details (when Entry Type = Payment Card) */}
+          {entryType === "card" && (
+            <div className="vault-inset space-y-3 rounded-2xl p-4">
+              <div className="flex items-center gap-2 text-xs font-extrabold text-amber-500">
+                <CreditCard className="h-4 w-4" />
+                Encrypted Payment Card Details
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="vault-text-secondary mb-1 block text-xs font-semibold">
+                    Cardholder Name
+                  </label>
+                  <input
+                    value={cardDetails.cardholderName}
+                    onChange={(e) =>
+                      setCardDetails((p) => ({ ...p, cardholderName: e.target.value }))
+                    }
+                    placeholder="Name on card"
+                    className="vault-input w-full rounded-xl px-3.5 py-2.5 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="vault-text-secondary mb-1 block text-xs font-semibold">
+                    Card Number
+                  </label>
+                  <input
+                    value={cardDetails.cardNumber}
+                    onChange={(e) =>
+                      setCardDetails((p) => ({ ...p, cardNumber: e.target.value }))
+                    }
+                    placeholder="4532 •••• •••• ••••"
+                    className="vault-input w-full rounded-xl px-3.5 py-2.5 font-mono text-xs"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2.5">
+                <div>
+                  <label className="vault-text-secondary mb-1 block text-xs font-semibold">
+                    Expiry
+                  </label>
+                  <input
+                    value={cardDetails.expiry}
+                    onChange={(e) =>
+                      setCardDetails((p) => ({ ...p, expiry: e.target.value }))
+                    }
+                    placeholder="MM/YY"
+                    className="vault-input w-full rounded-xl px-3 py-2.5 font-mono text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="vault-text-secondary mb-1 block text-xs font-semibold">
+                    CVV
+                  </label>
+                  <input
+                    type="password"
+                    value={cardDetails.cvv}
+                    onChange={(e) =>
+                      setCardDetails((p) => ({ ...p, cvv: e.target.value }))
+                    }
+                    placeholder="•••"
+                    className="vault-input w-full rounded-xl px-3 py-2.5 font-mono text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="vault-text-secondary mb-1 block text-xs font-semibold">
+                    ZIP / PIN
+                  </label>
+                  <input
+                    value={cardDetails.billingZip}
+                    onChange={(e) =>
+                      setCardDetails((p) => ({ ...p, billingZip: e.target.value }))
+                    }
+                    placeholder="400001"
+                    className="vault-input w-full rounded-xl px-3 py-2.5 font-mono text-xs"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* 2. Login Method Switcher: Password Login vs Connected OAuth */}
+          {entryType === "login" && (
           <div className="space-y-3">
             <label className="vault-text-secondary block text-xs font-semibold">
               Login Method
@@ -1093,6 +1286,8 @@ export function VaultItemModal() {
             )}
           </div>
 
+          )}
+
           {/* 3. Checkboxes for TOTP, Backup Security Codes & Passkey */}
           <div className="space-y-3">
             <label className="vault-text-secondary block text-xs font-semibold">
@@ -1154,17 +1349,46 @@ export function VaultItemModal() {
 
             {enableTotp && (
               <div className="vault-inset space-y-2.5 rounded-2xl p-3.5">
-                <div>
-                  <label className="vault-text-secondary mb-1 block text-xs font-semibold">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="vault-text-secondary text-xs font-semibold">
                     TOTP Secret Key or <code>otpauth://</code> URI
                   </label>
+                  <button
+                    type="button"
+                    disabled={decodingQr}
+                    onClick={() => qrInputRef.current?.click()}
+                    className="vault-card inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[11px] font-extrabold text-cyan-500 transition hover:border-cyan-500 disabled:opacity-50"
+                  >
+                    {decodingQr ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <ImageUp className="h-3.5 w-3.5" />
+                    )}
+                    Upload QR Image
+                  </button>
                   <input
-                    value={totpSecret}
-                    onChange={(e) => setTotpSecret(e.target.value)}
-                    placeholder="e.g. JBSWY3DPEHPK3PXP or otpauth://totp/..."
-                    className="vault-input w-full rounded-xl px-3.5 py-2.5 font-mono text-xs"
+                    ref={qrInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void handleQrImageUpload(f);
+                    }}
                   />
                 </div>
+                <input
+                  value={totpSecret}
+                  onChange={(e) => setTotpSecret(e.target.value)}
+                  placeholder="e.g. JBSWY3DPEHPK3PXP or upload a QR screenshot above..."
+                  className="vault-input w-full rounded-xl px-3.5 py-2.5 font-mono text-xs"
+                />
+                {qrStatus && (
+                  <div className="flex items-start gap-2 rounded-xl border border-emerald-500/35 bg-emerald-500/10 p-2.5 text-[11px] text-emerald-500">
+                    <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>{qrStatus}</span>
+                  </div>
+                )}
                 {totpSecret.trim().length >= 8 && (
                   <TotpLiveWidget secret={totpSecret} compact />
                 )}
@@ -1321,6 +1545,80 @@ export function VaultItemModal() {
             )}
           </div>
 
+          {/* 3.5 Custom Fields & Developer Secrets */}
+          <div className="vault-inset space-y-2.5 rounded-2xl p-3.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5">
+                <Layers className="h-4 w-4 text-amber-500" />
+                <span className="vault-text-primary text-xs font-extrabold">
+                  Custom Fields &amp; Developer Secrets ({customFields.length})
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={addCustomField}
+                className="inline-flex items-center gap-1 rounded-xl bg-amber-500/15 px-2.5 py-1 text-[11px] font-extrabold text-amber-500 hover:bg-amber-500/25"
+              >
+                <Plus className="h-3 w-3" />
+                Add Field
+              </button>
+            </div>
+            {customFields.length === 0 ? (
+              <p className="vault-text-muted text-[11px]">
+                Store API keys, Discord bot tokens, recovery emails, or .env secrets alongside this entry.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {customFields.map((cf, idx) => (
+                  <div key={cf.id} className="vault-card grid grid-cols-1 gap-2 rounded-xl p-2.5 sm:grid-cols-12 sm:items-center">
+                    <input
+                      value={cf.label}
+                      onChange={(e) =>
+                        setCustomFields((prev) =>
+                          prev.map((x, i) => (i === idx ? { ...x, label: e.target.value } : x))
+                        )
+                      }
+                      placeholder="Label (e.g. API Key)"
+                      className="vault-input rounded-lg px-2.5 py-1.5 text-xs sm:col-span-4"
+                    />
+                    <input
+                      type={cf.hidden ? "password" : "text"}
+                      value={cf.value}
+                      onChange={(e) =>
+                        setCustomFields((prev) =>
+                          prev.map((x, i) => (i === idx ? { ...x, value: e.target.value } : x))
+                        )
+                      }
+                      placeholder="Value / Secret"
+                      className="vault-input rounded-lg px-2.5 py-1.5 font-mono text-xs sm:col-span-6"
+                    />
+                    <div className="flex items-center justify-end gap-1 sm:col-span-2">
+                      <button
+                        type="button"
+                        title={cf.hidden ? "Hidden (masked)" : "Visible"}
+                        onClick={() =>
+                          setCustomFields((prev) =>
+                            prev.map((x, i) => (i === idx ? { ...x, hidden: !x.hidden } : x))
+                          )
+                        }
+                        className={`rounded-lg p-1.5 ${cf.hidden ? "text-amber-500" : "vault-text-muted"}`}
+                      >
+                        {cf.hidden ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCustomFields((prev) => prev.filter((_, i) => i !== idx))}
+                        className="vault-text-muted rounded-lg p-1.5 hover:text-rose-500"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* 4. Category Pills + Notes + Favorite */}
           <div className="space-y-3">
             <div>
@@ -1353,8 +1651,8 @@ export function VaultItemModal() {
                 Encrypted Notes (optional)
               </label>
               <textarea
-                rows={2}
-                maxLength={1000}
+                rows={entryType === "note" ? 6 : 2}
+                maxLength={5000}
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Recovery hints, security questions, billing notes..."

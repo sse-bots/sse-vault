@@ -18,6 +18,7 @@ import Detail from "./src/screens/Detail";
 import Form from "./src/screens/Form";
 import Import from "./src/screens/Import";
 import Settings from "./src/screens/Settings";
+import Trash from "./src/screens/Trash";
 
 type Tab = "vault" | "auth" | "security" | "settings";
 type Overlay =
@@ -32,6 +33,7 @@ type Overlay =
       prev?: Overlay;
     }
   | { kind: "import" }
+  | { kind: "trash" }
   | null;
 
 // Survives theme-change remounts so you stay on the same tab.
@@ -39,11 +41,11 @@ let lastTab: Tab = "vault";
 
 function OfflineBar() {
   const { offline, reconnect, busy } = useAuth();
-  const { savedAt } = useVault();
-  if (!offline) return null;
+  const { savedAt, pendingSyncCount, syncing, syncQueue } = useVault();
+  if (!offline && pendingSyncCount === 0) return null;
   return (
     <Pressable
-      onPress={reconnect}
+      onPress={() => (offline ? void reconnect() : void syncQueue())}
       style={{
         flexDirection: "row",
         alignItems: "center",
@@ -55,13 +57,14 @@ function OfflineBar() {
         borderBottomColor: c.warn + "55",
       }}
     >
-      <Ionicons name="cloud-offline" size={16} color={c.warn} />
+      <Ionicons name={offline ? "cloud-offline" : "sync"} size={16} color={c.warn} />
       <Text style={{ color: c.text, fontSize: 12, flex: 1 }}>
-        Offline · read-only
-        {savedAt ? ` · synced ${new Date(savedAt).toLocaleString()}` : ""}
+        {offline
+          ? `Offline${pendingSyncCount > 0 ? ` · ${pendingSyncCount} change(s) queued` : savedAt ? ` · synced ${new Date(savedAt).toLocaleTimeString()}` : ""}`
+          : `${pendingSyncCount} offline change(s) pending sync`}
       </Text>
       <Text style={{ color: c.warn, fontWeight: "800", fontSize: 12 }}>
-        {busy ? "Connecting…" : "Reconnect"}
+        {busy || syncing ? "Syncing…" : offline ? "Reconnect" : "Sync now"}
       </Text>
     </Pressable>
   );
@@ -141,6 +144,8 @@ function Main() {
     );
   } else if (overlay?.kind === "import") {
     body = <Import onClose={back} />;
+  } else if (overlay?.kind === "trash") {
+    body = <Trash onBack={back} />;
   } else {
     const tabs: {
       id: Tab;
@@ -162,6 +167,7 @@ function Main() {
               onAdd={() => setOverlay({ kind: "form" })}
               onSecurity={() => setTab("security")}
               onAuthTab={() => setTab("auth")}
+              onTrash={() => setOverlay({ kind: "trash" })}
             />
           )}
           {tab === "auth" && (
@@ -169,7 +175,7 @@ function Main() {
           )}
           {tab === "security" && <Health onOpen={(id) => openDetail(id)} />}
           {tab === "settings" && (
-            <Settings onImport={() => setOverlay({ kind: "import" })} />
+            <Settings onImport={() => setOverlay({ kind: "import" })} onTrash={() => setOverlay({ kind: "trash" })} />
           )}
         </View>
         <View
@@ -226,7 +232,7 @@ function Root() {
       </View>
     );
   if (phase === "signedOut") return <SignIn />;
-  if (phase === "pinSetup" || phase === "locked") return <PinScreen />;
+  if (phase === "pinSetup" || phase === "pinReset" || phase === "locked") return <PinScreen />;
   return (
     <VaultProvider>
       <Main key={themeVersion} />

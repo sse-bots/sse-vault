@@ -14,6 +14,7 @@ import {
   type StoredVaultSession,
 } from "@/lib/auth";
 import { migrateAndDropBetterAuthCollections } from "@/lib/legacy-auth-cleanup";
+import { logVaultActivity } from "@/lib/activity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,6 +24,7 @@ interface OAuthStatePayload {
   verifier: string;
   nextPath: string;
   mobile?: boolean;
+  pinReset?: boolean;
   redirectUri?: string;
   createdAt: number;
 }
@@ -125,13 +127,21 @@ export async function GET(req: Request) {
       ? claims.email.trim()
       : `${sub}@sse-world.local`;
 
-  // Auto-migrate any legacy Better Auth ownerUserIds to canonical `sub`
-  // and delete unneeded Better Auth collections (`user`, `account`, `session`, `verification`).
   try {
     await migrateAndDropBetterAuthCollections({ sub, email });
   } catch (err) {
     console.error("[Auth Callback] Legacy Better Auth cleanup warning:", err);
   }
+
+  await logVaultActivity(
+    sub,
+    "sign_in",
+    saved.pinReset
+      ? "Re-authenticated via SSE Accounts for Vault PIN reset"
+      : saved.mobile
+        ? "Signed in on SSE Vault Android app"
+        : "Signed in on SSE Vault web"
+  );
 
   const picture =
     typeof claims.picture === "string"
@@ -156,27 +166,31 @@ export async function GET(req: Request) {
     accessToken: tokenData.access_token,
     refreshToken: tokenData.refresh_token || null,
     expiresAt: Date.now() + 1000 * 60 * 60 * 24 * 30,
+    pinResetFreshAt: saved.pinReset ? Date.now() : null,
   };
 
-  const target =
+  const baseTarget =
     saved.nextPath &&
     saved.nextPath.startsWith("/") &&
     !saved.nextPath.startsWith("//")
       ? saved.nextPath
       : "/vault";
 
+  const target = saved.pinReset
+    ? `${baseTarget}${baseTarget.includes("?") ? "&" : "?"}pin_reset=1`
+    : baseTarget;
+
   if (saved.mobile) {
-    // Native app sign-in: hand the encrypted session to the app via deep link.
     const token = encryptCookiePayload(sessionPayload);
-    const back = new Response(null, {
+    const loc = `${MOBILE_APP_SCHEME}://auth?token=${encodeURIComponent(token)}${saved.pinReset ? "&pin_reset=1" : ""}`;
+    return new Response(null, {
       status: 302,
       headers: {
-        Location: `${MOBILE_APP_SCHEME}://auth?token=${encodeURIComponent(token)}`,
+        Location: loc,
         "Cache-Control": "no-store",
         "Set-Cookie": `${OAUTH_STATE_COOKIE}=; Path=/; Max-Age=0`,
       },
     });
-    return back;
   }
 
   const res = NextResponse.redirect(new URL(target, appBase));

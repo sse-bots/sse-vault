@@ -8,7 +8,7 @@ import { API_BASE, APP_SCHEME } from "./config";
 import { clearOffline, hasOffline, loadOffline, rememberPin, verifyOfflinePin } from "./offline";
 import type { PinStatus, VaultUser } from "./types";
 
-export type Phase = "loading" | "signedOut" | "pinSetup" | "locked" | "unlocked";
+export type Phase = "loading" | "signedOut" | "pinSetup" | "pinReset" | "locked" | "unlocked";
 
 const K_SESSION = "sse_session";
 const K_BIO_PIN = "sse_bio_pin";
@@ -30,6 +30,8 @@ interface AuthCtx {
   unlock: (pin: string) => Promise<boolean>;
   unlockWithBiometrics: () => Promise<boolean>;
   changePin: (current: string, next: string, confirm: string) => Promise<boolean>;
+  startPinReset: () => Promise<void>;
+  resetPin: (next: string, confirm: string) => Promise<boolean>;
   reconnect: () => Promise<void>;
   lock: () => void;
   enableBiometrics: (pin: string) => Promise<boolean>;
@@ -151,6 +153,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setBusy(false);
     }
   };
+
+  const startPinReset = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await WebBrowser.openAuthSessionAsync(
+        `${API_BASE}/api/auth/login?mobile=1&pin_reset=1`,
+        `${APP_SCHEME}://auth`
+      );
+      if (result.type !== "success") return;
+      const m = result.url.match(/[?&]token=([^&#]+)/);
+      if (!m) throw new Error("Re-authentication did not return a session.");
+      const token = decodeURIComponent(m[1]);
+      tokens.session = token;
+      await SecureStore.setItemAsync(K_SESSION, token);
+      const me = await api.me();
+      if (me.authenticated && me.user) {
+        setOffline(false);
+        setUser(me.user);
+        setPinStatus(me.pinStatus);
+        setPhase("pinReset");
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resetPin = (next: string, confirm: string) =>
+    run(async () => {
+      const res = await api.pin({ action: "reset", newPin: next, confirmPin: confirm });
+      await rememberPin(next);
+      if (bioEnabled) {
+        await SecureStore.setItemAsync(K_BIO_PIN, next, {
+          requireAuthentication: true,
+          authenticationPrompt: "Update biometric unlock",
+        }).catch(() => {});
+      }
+      applyUnlock(res);
+      return true;
+    });
 
   const signOut = async () => {
     if (!offline) await api.logout();
@@ -286,7 +330,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     <Ctx.Provider
       value={{
         phase, user, pinStatus, offline, bioEnabled, bioAvailable, busy, error,
-        signIn, signOut, setupPin, unlock, unlockWithBiometrics, changePin, reconnect, lock,
+        signIn, signOut, setupPin, unlock, unlockWithBiometrics, changePin, startPinReset, resetPin, reconnect, lock,
         enableBiometrics, disableBiometrics, setAutoLock,
         clearError: () => setError(null),
       }}

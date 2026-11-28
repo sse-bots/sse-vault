@@ -33,6 +33,8 @@ export interface ClientPinStatus {
   autoLockMinutes: number;
   failedAttempts: number;
   lockedUntil: string | null;
+  hasWebAuthn?: boolean;
+  webAuthnCount?: number;
 }
 
 interface ModalRequest {
@@ -491,6 +493,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         const categories = Array.from(
           new Set(g.items.map((i) => i.category as VaultCategory))
         );
+        const entryTypes = Array.from(
+          new Set(g.items.map((i) => i.entryType || "login"))
+        );
         const previewIdentities = g.items
           .map((i) => i.email || i.username || i.label)
           .filter(Boolean)
@@ -503,6 +508,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         return {
           domainKey: g.domainKey,
           appName: g.appName,
+          entryTypes,
           accountCount: g.items.length,
           oauthCount,
           totpCount,

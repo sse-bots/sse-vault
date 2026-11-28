@@ -3,11 +3,16 @@ import { decryptWithFallback, type DecryptionSource } from "./crypto";
 import { extractDomainKey, getAppNameForDomain } from "./domain";
 import { resolveOAuthProviderDomain } from "./oauth-links";
 import type {
+  StoredPasswordHistoryItem,
   StoredSecurityCode,
   VaultAuthType,
+  VaultCardDetailsDTO,
   VaultCategory,
+  VaultCustomFieldDTO,
   VaultDecryptionStatus,
+  VaultEntryType,
   VaultItemDTO,
+  VaultPasswordHistoryDTO,
   VaultSecurityCodeDTO,
 } from "./vault-types";
 
@@ -61,6 +66,69 @@ export function serializeVaultDoc(doc: Document): VaultItemDTO {
   );
   decryptionStatus = mergeStatus(decryptionStatus, notesRes.source);
 
+  let customFields: VaultCustomFieldDTO[] = [];
+  if (doc.encryptedCustomFields) {
+    const cfRes = decryptWithFallback(String(doc.encryptedCustomFields), docHexcode);
+    decryptionStatus = mergeStatus(decryptionStatus, cfRes.source);
+    if (cfRes.value) {
+      try {
+        const parsed = JSON.parse(cfRes.value) as unknown[];
+        if (Array.isArray(parsed)) {
+          customFields = parsed
+            .filter((x): x is Record<string, unknown> => Boolean(x && typeof x === "object"))
+            .map((x, idx) => ({
+              id: String(x.id || `cf_${idx}`),
+              label: String(x.label || "").trim(),
+              value: String(x.value || ""),
+              hidden: Boolean(x.hidden),
+            }))
+            .filter((x) => x.label || x.value);
+        }
+      } catch {
+        customFields = [];
+      }
+    }
+  }
+
+  let cardDetails: VaultCardDetailsDTO | null = null;
+  if (doc.encryptedCardDetails) {
+    const cardRes = decryptWithFallback(String(doc.encryptedCardDetails), docHexcode);
+    decryptionStatus = mergeStatus(decryptionStatus, cardRes.source);
+    if (cardRes.value) {
+      try {
+        const parsed = JSON.parse(cardRes.value) as Record<string, unknown>;
+        cardDetails = {
+          cardholderName: String(parsed.cardholderName || ""),
+          cardNumber: String(parsed.cardNumber || ""),
+          expiry: String(parsed.expiry || ""),
+          cvv: String(parsed.cvv || ""),
+          billingZip: String(parsed.billingZip || ""),
+        };
+      } catch {
+        cardDetails = null;
+      }
+    }
+  }
+
+  const rawHistory: StoredPasswordHistoryItem[] = Array.isArray(doc.passwordHistory)
+    ? (doc.passwordHistory as StoredPasswordHistoryItem[])
+    : [];
+  const passwordHistory: VaultPasswordHistoryDTO[] = rawHistory.map((h) => {
+    const hHex =
+      typeof h.hexcode === "string" && h.hexcode.trim()
+        ? h.hexcode.trim()
+        : docHexcode;
+    const dec = decryptWithFallback(h.encryptedPassword, hHex);
+    const locked = dec.source === "locked";
+    return {
+      password: locked ? null : dec.value,
+      changedAt: h.changedAt
+        ? new Date(h.changedAt).toISOString()
+        : new Date().toISOString(),
+      locked,
+    };
+  });
+
   const rawCodes: StoredSecurityCode[] = Array.isArray(doc.securityCodes)
     ? (doc.securityCodes as StoredSecurityCode[])
     : [];
@@ -106,11 +174,27 @@ export function serializeVaultDoc(doc: Document): VaultItemDTO {
     };
   });
 
-  const url = String(doc.url || "");
+  const entryType: VaultEntryType =
+    doc.entryType === "note" || doc.entryType === "card"
+      ? doc.entryType
+      : "login";
+
+  const url =
+    String(doc.url || "") ||
+    (entryType === "note"
+      ? "https://secure-note.local"
+      : entryType === "card"
+        ? "https://payment-cards.local"
+        : "");
+
   const domainKey =
     typeof doc.domainKey === "string" && doc.domainKey.trim()
       ? doc.domainKey.trim().toLowerCase()
-      : extractDomainKey(url) || "other";
+      : entryType === "note"
+        ? "secure-note.local"
+        : entryType === "card"
+          ? "payment-cards.local"
+          : extractDomainKey(url) || "other";
 
   const appName =
     typeof doc.appName === "string" && doc.appName.trim()
@@ -118,33 +202,37 @@ export function serializeVaultDoc(doc: Document): VaultItemDTO {
       : getAppNameForDomain(domainKey);
 
   const authType: VaultAuthType =
-    doc.authType === "oauth" ? "oauth" : "password";
+    entryType === "login" && doc.authType === "oauth" ? "oauth" : "password";
 
-  const rawCat = String(doc.category || "personal").toLowerCase() as VaultCategory;
+  const rawCat = String(doc.category || "personal") as VaultCategory;
   const category: VaultCategory = VALID_CATEGORIES.has(rawCat)
     ? rawCat
     : "personal";
 
   return {
     id: String(doc._id),
+    entryType,
     domainKey,
     appName,
     label: String(doc.label || appName),
     url,
     authType,
     oauthProvider:
-      authType === "oauth" && typeof doc.oauthProvider === "string" && doc.oauthProvider.trim()
+      authType === "oauth" &&
+      typeof doc.oauthProvider === "string" &&
+      doc.oauthProvider.trim()
         ? doc.oauthProvider.trim()
         : null,
     oauthProviderDomain:
       authType === "oauth"
-        ? (typeof doc.oauthProviderDomain === "string" && doc.oauthProviderDomain.trim()
-            ? doc.oauthProviderDomain.trim().toLowerCase()
-            : resolveOAuthProviderDomain({
-                oauthProvider:
-                  typeof doc.oauthProvider === "string" ? doc.oauthProvider : null,
-                oauthProviderDomain: null,
-              }) || null)
+        ? typeof doc.oauthProviderDomain === "string" &&
+          doc.oauthProviderDomain.trim()
+          ? doc.oauthProviderDomain.trim().toLowerCase()
+          : resolveOAuthProviderDomain({
+              oauthProvider:
+                typeof doc.oauthProvider === "string" ? doc.oauthProvider : null,
+              oauthProviderDomain: null,
+            }) || null
         : null,
     oauthLinkedItemId:
       authType === "oauth" &&
@@ -156,20 +244,22 @@ export function serializeVaultDoc(doc: Document): VaultItemDTO {
     hasPasskey: Boolean(doc.hasPasskey),
     email: typeof doc.email === "string" && doc.email ? doc.email : null,
     username:
-      authType === "oauth"
-        ? null
-        : typeof doc.username === "string" && doc.username
-          ? doc.username
-          : null,
-    password: authType === "oauth" ? null : pwdRes.value,
+      typeof doc.username === "string" && doc.username ? doc.username : null,
+    password: pwdRes.value,
     totpSecret: totpRes.value,
     securityCodes,
+    customFields,
+    cardDetails,
+    passwordHistory,
     notes: notesRes.value,
     favorite: Boolean(doc.favorite),
     keyFingerprint:
       typeof doc.keyFingerprint === "string" ? doc.keyFingerprint : null,
     decryptionStatus,
     hasStoredHexcode: Boolean(docHexcode),
+    deletedAt: doc.deletedAt
+      ? new Date(doc.deletedAt as string | Date).toISOString()
+      : null,
     createdAt: doc.createdAt
       ? new Date(doc.createdAt as string | Date).toISOString()
       : new Date().toISOString(),

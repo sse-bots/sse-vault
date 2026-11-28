@@ -42,7 +42,7 @@ jobs:
         run: |
           npm install --no-audit --no-fund
           # Force the Expo SDK 52 versions of the native modules (npm otherwise pulls newer ones).
-          npm install --no-audit --no-fund expo-font@~13.0.4 expo-asset@~11.0.5 expo-constants@~17.0.8 expo-file-system@~18.0.12 expo-keep-awake@~14.0.3 expo-application@~6.0.2 expo-document-picker@~13.0.3 expo-sharing@~13.0.1 @expo/vector-icons@~14.0.4
+          npm install --no-audit --no-fund expo-font@~13.0.4 expo-asset@~11.0.5 expo-constants@~17.0.8 expo-file-system@~18.0.12 expo-keep-awake@~14.0.3 expo-application@~6.0.2 expo-document-picker@~13.0.3 expo-sharing@~13.0.1 expo-camera@~16.0.18 expo-image-picker@~16.0.6 @expo/vector-icons@~14.0.4
           npm ls expo expo-font expo-modules-core expo-asset || true
           echo "Packages using the SDK 53+ gradle plugin (should be none):"
           grep -l "expo-module-gradle-plugin" node_modules/*/android/build.gradle || true

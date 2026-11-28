@@ -57,5 +57,7 @@ export async function getVaultCollections() {
     db,
     vaultItems: db.collection<Document>("vault_items"),
     vaultPinConfigs: db.collection<Document>("vault_pin_configs"),
+    vaultActivityLogs: db.collection<Document>("vault_activity_logs"),
+    vaultShares: db.collection<Document>("vault_shares"),
   };
 }

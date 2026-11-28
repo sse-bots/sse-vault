@@ -23,10 +23,27 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const NO_CACHE = { "Cache-Control": "no-store" };
+const TRASH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+const customFieldSchema = z.object({
+  id: z.string().trim().max(64).optional(),
+  label: z.string().trim().max(80),
+  value: z.string().max(2000),
+  hidden: z.boolean().optional().default(false),
+});
+
+const cardDetailsSchema = z.object({
+  cardholderName: z.string().trim().max(120).optional().default(""),
+  cardNumber: z.string().trim().max(40).optional().default(""),
+  expiry: z.string().trim().max(20).optional().default(""),
+  cvv: z.string().trim().max(12).optional().default(""),
+  billingZip: z.string().trim().max(24).optional().default(""),
+});
 
 const createItemSchema = z.object({
+  entryType: z.enum(["login", "note", "card"]).optional().default("login"),
   label: z.string().trim().max(80).optional().default(""),
-  url: z.string().trim().min(1, "Website URL is required.").max(300),
+  url: z.string().trim().max(300).optional().default(""),
   expectedDomain: z.string().trim().max(120).optional(),
   authType: z.enum(["password", "oauth"]).optional().default("password"),
   oauthProvider: z.string().trim().max(60).optional().default(""),
@@ -46,7 +63,9 @@ const createItemSchema = z.object({
     .max(100)
     .optional()
     .default([]),
-  notes: z.string().trim().max(1000).optional().default(""),
+  customFields: z.array(customFieldSchema).max(30).optional().default([]),
+  cardDetails: cardDetailsSchema.nullable().optional().default(null),
+  notes: z.string().trim().max(5000).optional().default(""),
   favorite: z.boolean().optional().default(false),
 });
 
@@ -59,8 +78,16 @@ export async function GET(req: Request) {
   const domainFilter = (searchParams.get("domain") || "").trim().toLowerCase();
 
   const { vaultItems } = await getVaultCollections();
+  const cutoff = new Date(Date.now() - TRASH_TTL_MS);
+  await vaultItems
+    .deleteMany({ ownerUserId: ctx.userId, deletedAt: { $lte: cutoff } })
+    .catch(() => {});
+
   const docs = await vaultItems
-    .find({ ownerUserId: ctx.userId })
+    .find({
+      ownerUserId: ctx.userId,
+      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    })
     .sort({ favorite: -1, updatedAt: -1 })
     .toArray();
 
@@ -89,103 +116,140 @@ export async function POST(req: Request) {
   const parsed = createItemSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: parsed.error.issues[0]?.message || "Invalid vault item data." },
-      { status: 400 }
+      { error: parsed.error.issues[0]?.message || "Invalid vault item." },
+      { status: 400, headers: NO_CACHE }
     );
   }
 
   const d = parsed.data;
-  const cleanUrl = normalizeWebsiteUrl(d.url);
-  const domainKey = extractDomainKey(cleanUrl);
-  if (!domainKey) {
-    return NextResponse.json(
-      {
-        error:
-          "Please enter a valid website URL (e.g. github.com or google.com).",
-      },
-      { status: 400 }
-    );
-  }
+  const entryType = d.entryType;
 
-  if (d.expectedDomain && !isUrlAllowedForDomain(cleanUrl, d.expectedDomain)) {
-    const expectedKey = extractDomainKey(d.expectedDomain);
-    const expectedName = getAppNameForDomain(expectedKey);
-    return NextResponse.json(
-      {
-        error: `Only ${expectedKey} URLs are allowed inside ${expectedName}. You entered a ${domainKey} URL.`,
-      },
-      { status: 400 }
-    );
-  }
+  let cleanUrl = "";
+  let domainKey = "";
+  let appName = "";
 
-  if (d.authType === "oauth") {
-    if (!d.email.trim()) {
+  if (entryType === "note") {
+    cleanUrl = d.url ? normalizeWebsiteUrl(d.url) : "https://secure-note.local";
+    domainKey = d.url
+      ? extractDomainKey(cleanUrl) || "secure-note.local"
+      : "secure-note.local";
+    appName = getAppNameForDomain(domainKey);
+  } else if (entryType === "card") {
+    cleanUrl = d.url ? normalizeWebsiteUrl(d.url) : "https://payment-cards.local";
+    domainKey = d.url
+      ? extractDomainKey(cleanUrl) || "payment-cards.local"
+      : "payment-cards.local";
+    appName = getAppNameForDomain(domainKey);
+  } else {
+    if (!d.url.trim()) {
       return NextResponse.json(
-        { error: "Please enter the email address used for OAuth sign-in." },
-        { status: 400 }
+        { error: "Website URL is required." },
+        { status: 400, headers: NO_CACHE }
       );
     }
+    cleanUrl = normalizeWebsiteUrl(d.url);
+    domainKey = extractDomainKey(cleanUrl);
+    if (!domainKey) {
+      return NextResponse.json(
+        { error: "Please enter a valid website URL (e.g. github.com)." },
+        { status: 400, headers: NO_CACHE }
+      );
+    }
+    if (d.expectedDomain && !isUrlAllowedForDomain(cleanUrl, d.expectedDomain)) {
+      const targetApp = getAppNameForDomain(d.expectedDomain);
+      return NextResponse.json(
+        {
+          error: `Only ${d.expectedDomain} URLs can be added inside ${targetApp}.`,
+        },
+        { status: 400, headers: NO_CACHE }
+      );
+    }
+    appName = getAppNameForDomain(domainKey);
   }
 
-  const appName = getAppNameForDomain(domainKey);
-  const label = d.label.trim() || appName;
+  if (entryType === "login" && d.authType === "oauth" && !d.email.trim()) {
+    return NextResponse.json(
+      { error: "Please enter the email address used for OAuth sign-in." },
+      { status: 400, headers: NO_CACHE }
+    );
+  }
 
   const activeHex = getActiveKeyHex();
-  const keyFingerprint = getKeyFingerprint(activeHex);
   const storeHex = shouldStoreHexcodeInDb();
+  const keyFingerprint = getKeyFingerprint(activeHex);
 
   const uniqueCodes = Array.from(
     new Set(d.securityCodes.map((c) => c.trim()).filter(Boolean))
   );
 
-  const encryptedCodes: StoredSecurityCode[] = uniqueCodes.map((code) => ({
+  const storedCodes: StoredSecurityCode[] = uniqueCodes.map((raw) => ({
     id: generateCodeId(),
-    encryptedCode: encryptSecret(code),
-    length: code.length,
+    encryptedCode: encryptSecret(raw),
+    length: raw.length,
     used: false,
     usedAt: null,
-    ...(storeHex ? { hexcode: activeHex } : {}),
   }));
 
+  const cleanedCustomFields = d.customFields
+    .filter((f) => f.label.trim() || f.value.trim())
+    .map((f) => ({
+      id: f.id || generateCodeId(),
+      label: f.label.trim() || "Field",
+      value: f.value,
+      hidden: Boolean(f.hidden),
+    }));
+
+  const isOAuth = entryType === "login" && d.authType === "oauth";
   const now = new Date();
-  const doc = {
+  const doc: Record<string, unknown> = {
     ownerUserId: ctx.userId,
+    entryType,
     domainKey,
     appName,
-    label,
+    label: d.label.trim() || appName,
     url: cleanUrl,
-    authType: d.authType,
-    oauthProvider:
-      d.authType === "oauth" ? d.oauthProvider.trim() || "Google" : null,
-    oauthProviderDomain:
-      d.authType === "oauth"
-        ? (d.oauthProviderDomain.trim().toLowerCase() ||
-            resolveOAuthProviderDomain({
-              oauthProvider: d.oauthProvider.trim() || "Google",
-              oauthProviderDomain: null,
-            }) ||
-            null)
-        : null,
+    authType: isOAuth ? "oauth" : "password",
+    oauthProvider: isOAuth ? d.oauthProvider.trim() || "Google" : null,
+    oauthProviderDomain: isOAuth
+      ? d.oauthProviderDomain.trim().toLowerCase() ||
+        resolveOAuthProviderDomain({
+          oauthProvider: d.oauthProvider.trim() || "Google",
+          oauthProviderDomain: null,
+        }) ||
+        null
+      : null,
     oauthLinkedItemId:
-      d.authType === "oauth" && d.oauthLinkedItemId.trim()
+      isOAuth && d.oauthLinkedItemId.trim()
         ? d.oauthLinkedItemId.trim()
         : null,
     category: d.category,
-    hasPasskey: Boolean(d.hasPasskey),
+    hasPasskey: entryType === "login" ? d.hasPasskey : false,
     email: d.email.trim() || null,
-    username: d.authType === "oauth" ? null : d.username.trim() || null,
+    username: isOAuth || entryType !== "login" ? null : d.username.trim() || null,
     encryptedPassword:
-      d.authType === "oauth"
+      isOAuth || entryType !== "login"
         ? null
         : d.password
           ? encryptSecret(d.password)
           : null,
-    encryptedTotpSecret: d.totpSecret ? encryptSecret(d.totpSecret) : null,
-    securityCodes: encryptedCodes,
-    encryptedNotes: d.notes ? encryptSecret(d.notes) : null,
-    favorite: Boolean(d.favorite),
+    encryptedTotpSecret: d.totpSecret.trim()
+      ? encryptSecret(d.totpSecret.trim())
+      : null,
+    securityCodes: storedCodes,
+    encryptedCustomFields:
+      cleanedCustomFields.length > 0
+        ? encryptSecret(JSON.stringify(cleanedCustomFields))
+        : null,
+    encryptedCardDetails:
+      entryType === "card" && d.cardDetails
+        ? encryptSecret(JSON.stringify(d.cardDetails))
+        : null,
+    passwordHistory: [],
+    encryptedNotes: d.notes.trim() ? encryptSecret(d.notes.trim()) : null,
+    favorite: d.favorite,
     keyFingerprint,
-    ...(storeHex ? { hexcode: activeHex } : {}),
+    hexcode: storeHex ? activeHex : null,
+    deletedAt: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -194,17 +258,17 @@ export async function POST(req: Request) {
   const existingGroupCount = await vaultItems.countDocuments({
     ownerUserId: ctx.userId,
     domainKey,
+    $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
   });
 
   const inserted = await vaultItems.insertOne(doc);
+  const created = await vaultItems.findOne({ _id: inserted.insertedId });
 
   return NextResponse.json(
     {
       ok: true,
       addedToExistingGroup: existingGroupCount > 0,
-      domainKey,
-      appName,
-      item: serializeVaultDoc({ _id: inserted.insertedId, ...doc }),
+      item: created ? serializeVaultDoc(created) : null,
     },
     { status: 201, headers: NO_CACHE }
   );

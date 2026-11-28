@@ -17,6 +17,7 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const rawNext = searchParams.get("next") || "/vault";
   const mobile = searchParams.get("mobile") === "1";
+  const pinReset = searchParams.get("pin_reset") === "1";
   const nextPath =
     rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/vault";
 
@@ -44,12 +45,16 @@ export async function GET(req: Request) {
   authUrl.searchParams.set("state", state);
   authUrl.searchParams.set("code_challenge", challenge);
   authUrl.searchParams.set("code_challenge_method", "S256");
+  if (pinReset) {
+    authUrl.searchParams.set("prompt", "login");
+  }
 
   const payload = encryptCookiePayload({
     state,
     verifier,
     nextPath,
     mobile,
+    pinReset,
     redirectUri,
     createdAt: Date.now(),
   });

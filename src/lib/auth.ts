@@ -19,6 +19,7 @@ export interface StoredVaultSession {
   accessToken: string;
   refreshToken?: string | null;
   expiresAt: number;
+  pinResetFreshAt?: number | null;
 }
 
 function normalizeUrl(raw?: string | null): string {

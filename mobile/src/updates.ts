@@ -1,5 +1,5 @@
 import * as Application from "expo-application";
-import { APP_VERSION, GITHUB_REPO } from "./config";
+import { API_BASE, APP_VERSION, GITHUB_REPO } from "./config";
 
 export interface UpdateInfo {
   version: string;
@@ -19,8 +19,35 @@ function isNewer(a: string, b: string) {
 
 export const currentVersion = () => Application.nativeApplicationVersion || APP_VERSION;
 
-/** Returns the newest GitHub release, and whether it is newer than the installed app. */
 export async function checkForUpdate(): Promise<{ latest: UpdateInfo | null; hasUpdate: boolean }> {
+  // 1. Prefer SSE Vault backend proxy (supports private GitHub repos via GITHUB_TOKEN)
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 8000);
+    const res = await fetch(`${API_BASE}/api/apk/latest`, {
+      headers: { Accept: "application/json" },
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    if (res.ok) {
+      const data = await res.json();
+      const rel = data?.release;
+      if (rel?.version) {
+        const rawApk = rel.apkUrl ? String(rel.apkUrl) : null;
+        const resolvedApk = rawApk && rawApk.startsWith("/") ? `${API_BASE}${rawApk}` : rawApk;
+        const latest: UpdateInfo = {
+          version: String(rel.version),
+          apkUrl: resolvedApk,
+          pageUrl: `${API_BASE}/apk`,
+          notes: rel.changelog || null,
+        };
+        return { latest, hasUpdate: isNewer(latest.version, currentVersion()) };
+      }
+    }
+  } catch {
+    // Fallback to public GitHub API below
+  }
+
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 8000);

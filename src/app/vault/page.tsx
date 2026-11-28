@@ -4,6 +4,10 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
+  CheckSquare,
+  Download,
+  Square,
+  Trash2,
   ChevronRight,
   KeyRound,
   LayoutGrid,
@@ -23,7 +27,7 @@ import { SiteIcon } from "@/components/SiteIcon";
 import { KeyRecoveryBanner } from "@/components/KeyRecoveryBanner";
 import { VAULT_CATEGORIES, type VaultCategory } from "@/lib/vault-types";
 
-type AppFilter = "all" | "oauth" | "totp" | "keys" | "favorites";
+type AppFilter = "all" | "oauth" | "totp" | "keys" | "notes" | "cards" | "favorites";
 type SortMode = "favorites" | "accounts" | "az" | "recent";
 
 export default function VaultAppsDirectoryPage() {
@@ -47,6 +51,9 @@ export default function VaultAppsDirectoryPage() {
   );
   const [sortBy, setSortBy] = useState<SortMode>("favorites");
   const [compactView, setCompactView] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedDomains, setSelectedDomains] = useState<string[]>([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const filteredGroups = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -54,6 +61,8 @@ export default function VaultAppsDirectoryPage() {
       if (filter === "oauth" && g.oauthCount === 0) return false;
       if (filter === "totp" && g.totpCount === 0) return false;
       if (filter === "keys" && g.totalCodesCount === 0) return false;
+      if (filter === "notes" && !g.entryTypes.includes("note")) return false;
+      if (filter === "cards" && !g.entryTypes.includes("card")) return false;
       if (filter === "favorites" && !g.hasFavorite) return false;
       if (
         categoryFilter !== "all" &&
@@ -186,6 +195,30 @@ export default function VaultAppsDirectoryPage() {
               className="vault-input w-full rounded-2xl py-2.5 pl-10 pr-4 text-xs"
             />
           </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setSelectMode((v) => !v);
+              setSelectedDomains([]);
+            }}
+            className={`inline-flex items-center gap-1.5 rounded-2xl border px-3 py-2.5 text-xs font-bold transition ${
+              selectMode
+                ? "border-amber-500 bg-amber-500/15 text-amber-500"
+                : "vault-inset vault-text-primary hover:border-amber-500"
+            }`}
+          >
+            <CheckSquare className="h-3.5 w-3.5 text-amber-500" />
+            {selectMode ? "Done" : "Select"}
+          </button>
+
+          <Link
+            href="/vault/trash"
+            className="vault-inset vault-text-primary inline-flex items-center gap-1.5 rounded-2xl px-3 py-2.5 text-xs font-bold transition hover:border-rose-500 hover:text-rose-400"
+          >
+            <Trash2 className="h-3.5 w-3.5 text-rose-500" />
+            Trash
+          </Link>
 
           <button
             type="button"
@@ -336,15 +369,115 @@ export default function VaultAppsDirectoryPage() {
           )}
         </div>
       ) : (
-        <div className={compactView ? "space-y-2" : "grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-3.5 lg:grid-cols-3"}>
+        <div className="space-y-3">
+          {selectMode && (
+            <div className="vault-card flex flex-wrap items-center justify-between gap-3 rounded-2xl border-amber-500/40 p-3.5 text-xs">
+              <span className="vault-text-primary font-extrabold">
+                {selectedDomains.length} app group(s) selected
+              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  disabled={bulkBusy || selectedDomains.length === 0}
+                  defaultValue=""
+                  onChange={async (e) => {
+                    const cat = e.target.value;
+                    if (!cat) return;
+                    const ids = items
+                      .filter((i) => selectedDomains.includes(i.domainKey))
+                      .map((i) => i.id);
+                    if (!ids.length) return;
+                    setBulkBusy(true);
+                    try {
+                      await fetch("/api/vault/bulk", {
+                        method: "POST",
+                        credentials: "include",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ action: "category", ids, category: cat }),
+                      });
+                      await refreshVault();
+                      setSelectedDomains([]);
+                      setSelectMode(false);
+                    } finally {
+                      setBulkBusy(false);
+                    }
+                  }}
+                  className="vault-input rounded-xl px-2.5 py-1.5 text-xs font-bold"
+                >
+                  <option value="">Change Category...</option>
+                  {VAULT_CATEGORIES.map((c) => (
+                    <option key={c.id} value={c.id}>{c.label}</option>
+                  ))}
+                </select>
+                <a
+                  href={`/api/vault/export?format=json&ids=${encodeURIComponent(
+                    items.filter((i) => selectedDomains.includes(i.domainKey)).map((i) => i.id).join(",")
+                  )}`}
+                  className={`vault-inset inline-flex items-center gap-1 rounded-xl px-3 py-1.5 font-bold ${
+                    selectedDomains.length === 0 ? "pointer-events-none opacity-40" : "hover:border-amber-500"
+                  }`}
+                >
+                  <Download className="h-3.5 w-3.5 text-amber-500" />
+                  Export
+                </a>
+                <button
+                  type="button"
+                  disabled={bulkBusy || selectedDomains.length === 0}
+                  onClick={async () => {
+                    const ids = items
+                      .filter((i) => selectedDomains.includes(i.domainKey))
+                      .map((i) => i.id);
+                    if (!ids.length) return;
+                    if (!confirm(`Move ${ids.length} account(s) to the 30-day Trash Bin?`)) return;
+                    setBulkBusy(true);
+                    try {
+                      await fetch("/api/vault/bulk", {
+                        method: "POST",
+                        credentials: "include",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ action: "trash", ids }),
+                      });
+                      await refreshVault();
+                      setSelectedDomains([]);
+                      setSelectMode(false);
+                    } finally {
+                      setBulkBusy(false);
+                    }
+                  }}
+                  className="inline-flex items-center gap-1 rounded-xl bg-rose-500/15 px-3 py-1.5 font-extrabold text-rose-400 hover:bg-rose-500/25 disabled:opacity-40"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Move to Trash
+                </button>
+              </div>
+            </div>
+          )}
+          <div className={compactView ? "space-y-2" : "grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-3.5 lg:grid-cols-3"}>
           {filteredGroups.map((group) => (
             <Link
               key={group.domainKey}
               href={`/vault/${encodeURIComponent(group.domainKey)}`}
+              onClick={(e) => {
+                if (!selectMode) return;
+                e.preventDefault();
+                setSelectedDomains((prev) =>
+                  prev.includes(group.domainKey)
+                    ? prev.filter((d) => d !== group.domainKey)
+                    : [...prev, group.domainKey]
+                );
+              }}
               className={`vault-card-interactive group flex min-w-0 ${compactView ? "flex-row items-center justify-between gap-3 rounded-2xl px-3.5 py-3" : "flex-col justify-between gap-3.5 rounded-3xl p-4 sm:p-5"}`}
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-3">
+                  {selectMode && (
+                    <span className="shrink-0 text-amber-500">
+                      {selectedDomains.includes(group.domainKey) ? (
+                        <CheckSquare className="h-5 w-5" />
+                      ) : (
+                        <Square className="h-5 w-5 opacity-50" />
+                      )}
+                    </span>
+                  )}
                   <SiteIcon
                     domainOrUrl={group.domainKey}
                     label={group.appName}
@@ -421,6 +554,7 @@ export default function VaultAppsDirectoryPage() {
               </div>
             </Link>
           ))}
+          </div>
         </div>
       )}
     </div>
