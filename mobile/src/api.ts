@@ -82,9 +82,9 @@ export const api = {
   items: async () =>
     (await request<{ items: VaultItem[] }>("/api/vault")).items,
   createItem: (body: ItemInput) =>
-    request("/api/vault", { method: "POST", body: JSON.stringify(body) }),
+    request<{ ok: boolean; item?: VaultItem; addedToExistingGroup?: boolean }>("/api/vault", { method: "POST", body: JSON.stringify(body) }),
   updateItem: (id: string, body: ItemInput) =>
-    request(`/api/vault/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    request<{ ok: boolean; item?: VaultItem }>(`/api/vault/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteItem: (id: string) => request(`/api/vault/${id}`, { method: "DELETE" }),
   toggleCode: (id: string, codeId: string, used: boolean) =>
     request(`/api/vault/${id}/codes`, {

@@ -8,7 +8,6 @@ import {
   CheckCircle2,
   Copy,
   Download,
-  ExternalLink,
   FileSpreadsheet,
   FileText,
   KeyRound,
@@ -19,7 +18,6 @@ import {
   Scale,
   ShieldAlert,
   ShieldCheck,
-  Smartphone,
   Sparkles,
   Upload,
 } from "lucide-react";

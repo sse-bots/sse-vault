@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { FlatList, Pressable, Text, View } from "react-native";
 import { useVault } from "../vault";
+import { usePrefs } from "../prefs";
 import { formatCode, generateTotp, parseTotp, secondsLeft } from "../totp";
 import { Empty, SiteIcon, Toast, copySecret, useToast } from "../ui";
 import { c, radius } from "../theme";
@@ -29,6 +30,7 @@ export function Countdown({ left, period }: { left: number; period: number }) {
 
 export default function Authenticator({ onOpen }: { onOpen: (id: string) => void }) {
   const { items } = useVault();
+  const { privacyBlur } = usePrefs();
   const now = useNow();
   const toast = useToast();
   const list = useMemo(
@@ -61,7 +63,7 @@ export default function Authenticator({ onOpen }: { onOpen: (id: string) => void
               <View style={{ flex: 1 }}>
                 <Text numberOfLines={1} style={{ color: c.muted, fontSize: 13 }}>{i.label}</Text>
                 <Text style={{ color: left <= 5 ? c.danger : c.text, fontSize: 28, fontWeight: "800",
-                  letterSpacing: 3, fontVariant: ["tabular-nums"] }}>{formatCode(code)}</Text>
+                  letterSpacing: 3, fontVariant: ["tabular-nums"] }}>{privacyBlur ? "••• •••" : formatCode(code)}</Text>
               </View>
               <Countdown left={left} period={cfg!.period} />
             </Pressable>
