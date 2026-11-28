@@ -100,15 +100,20 @@ function withUpdaterMainApplication(config) {
       );
     }
     if (!contents.includes("SseUpdaterPackage()")) {
-      if (contents.includes("PackageList(this).packages.apply {")) {
+      if (/\breturn\s+packages\b/.test(contents)) {
+        contents = contents.replace(
+          /([ \t]*)return\s+packages\b/,
+          "$1packages.add(SseUpdaterPackage())\n$1return packages"
+        );
+      } else if (contents.includes("PackageList(this).packages.apply {")) {
         contents = contents.replace(
           "PackageList(this).packages.apply {",
-          "PackageList(this).packages.apply {\n              add(SseUpdaterPackage())"
+          "PackageList(this).packages.apply {\n              add(SseUpdaterPackage())\n"
         );
       } else if (contents.includes("PackageList(this).packages")) {
         contents = contents.replace(
           "PackageList(this).packages",
-          "PackageList(this).packages.apply { add(SseUpdaterPackage()) }"
+          "PackageList(this).packages.apply {\n              add(SseUpdaterPackage())\n            }"
         );
       }
     }

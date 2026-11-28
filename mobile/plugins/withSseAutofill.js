@@ -143,15 +143,20 @@ function withAutofillMainApplication(config) {
       );
     }
     if (!contents.includes("SseAutofillPackage()")) {
-      if (contents.includes("PackageList(this).packages.apply {")) {
+      if (/\breturn\s+packages\b/.test(contents)) {
+        contents = contents.replace(
+          /([ \t]*)return\s+packages\b/,
+          "$1packages.add(SseAutofillPackage())\n$1return packages"
+        );
+      } else if (contents.includes("PackageList(this).packages.apply {")) {
         contents = contents.replace(
           "PackageList(this).packages.apply {",
-          "PackageList(this).packages.apply {\n              add(SseAutofillPackage())"
+          "PackageList(this).packages.apply {\n              add(SseAutofillPackage())\n"
         );
       } else if (contents.includes("PackageList(this).packages")) {
         contents = contents.replace(
           "PackageList(this).packages",
-          "PackageList(this).packages.apply { add(SseAutofillPackage()) }"
+          "PackageList(this).packages.apply {\n              add(SseAutofillPackage())\n            }"
         );
       }
     }
