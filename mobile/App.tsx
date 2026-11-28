@@ -222,6 +222,51 @@ function Main() {
   );
 }
 
+class ScreenErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24, backgroundColor: c.bg }}>
+          <Ionicons name="warning-outline" size={44} color={c.danger} />
+          <Text style={{ color: c.text, fontSize: 18, fontWeight: "800", marginTop: 12 }}>
+            Something went wrong
+          </Text>
+          <Text style={{ color: c.muted, fontSize: 12, textAlign: "center", marginTop: 8 }}>
+            {this.state.error.message || "Unexpected rendering error."}
+          </Text>
+          <Pressable
+            onPress={() => {
+              lastTab = "vault";
+              this.setState({ error: null });
+            }}
+            style={{
+              marginTop: 20,
+              backgroundColor: c.accent,
+              paddingHorizontal: 20,
+              paddingVertical: 12,
+              borderRadius: 12,
+            }}
+          >
+            <Text style={{ color: c.accentText, fontWeight: "800", fontSize: 14 }}>
+              Return to Vault
+            </Text>
+          </Pressable>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function Root() {
   const { phase } = useAuth();
   const { themeVersion } = usePrefs();
@@ -235,7 +280,9 @@ function Root() {
   if (phase === "pinSetup" || phase === "pinReset" || phase === "locked") return <PinScreen />;
   return (
     <VaultProvider>
-      <Main key={themeVersion} />
+      <ScreenErrorBoundary>
+        <Main key={themeVersion} />
+      </ScreenErrorBoundary>
     </VaultProvider>
   );
 }
