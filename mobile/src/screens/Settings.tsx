@@ -24,12 +24,14 @@ import {
   Button,
   Card,
   Chip,
+  Field,
   IconButton,
   SectionTitle,
   SettingsRow,
   Toast,
   useToast,
 } from "../ui";
+import type { ActivityEvent } from "../types";
 import { PinPad } from "./Pin";
 
 const AUTO_LOCK: { m: number; label: string }[] = [
@@ -74,7 +76,10 @@ export default function Settings({ onImport, onTrash }: { onImport: () => void; 
   useEffect(() => {
     void isOfflineEnabled().then(setOfflineOn);
     if (!offline) {
-      void api.activity().then(setActivity).catch(() => {});
+      void api
+        .activity()
+        .then((list) => setActivity(Array.isArray(list) ? list : []))
+        .catch(() => {});
     }
   }, [offline]);
 
@@ -289,9 +294,21 @@ export default function Settings({ onImport, onTrash }: { onImport: () => void; 
         <SectionTitle>Data</SectionTitle>
         <Card style={{ padding: 0 }}>
           <SettingsRow
+            icon="trash-outline"
+            title="Trash Bin (30-Day Recovery)"
+            subtitle="Restore or permanently erase deleted items"
+            onPress={offline ? undefined : onTrash}
+          />
+          <SettingsRow
+            icon="shield-checkmark-outline"
+            title="Export encrypted (.ssevault)"
+            subtitle="AES-256-GCM passphrase-protected backup"
+            onPress={offline ? undefined : () => setEncModal(true)}
+          />
+          <SettingsRow
             icon="download-outline"
             title="Import passwords"
-            subtitle="CSV from Chrome, Bitwarden, 1Password… or JSON backup"
+            subtitle="CSV, JSON backup, or encrypted .ssevault file"
             onPress={offline ? undefined : onImport}
           />
           <SettingsRow
