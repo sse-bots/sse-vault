@@ -67,12 +67,16 @@ function generateStrongPassword(len = 20): string {
 export default function Form({
   id,
   presetUrl,
+  presetEmail,
+  presetPassword,
   lockedDomain,
   presetParentId,
   onClose,
 }: {
   id?: string;
   presetUrl?: string;
+  presetEmail?: string;
+  presetPassword?: string;
   lockedDomain?: string;
   presetParentId?: string;
   onClose: () => void;
@@ -163,10 +167,18 @@ export default function Form({
   const [quickError, setQuickError] = useState<string | null>(null);
 
   const [email, setEmail] = useState(
-    presetParent?.email || presetParent?.username || existing?.email || ""
+    presetParent?.email ||
+      presetParent?.username ||
+      existing?.email ||
+      (presetEmail && presetEmail.includes("@") ? presetEmail : "")
   );
-  const [username, setUsername] = useState(existing?.username || "");
-  const [password, setPassword] = useState(existing?.password || "");
+  const [username, setUsername] = useState(
+    existing?.username ||
+      (presetEmail && !presetEmail.includes("@") ? presetEmail : "")
+  );
+  const [password, setPassword] = useState(
+    existing?.password || presetPassword || ""
+  );
   const [showPassword, setShowPassword] = useState(false);
 
   // Exact Website Security Extras Checkboxes

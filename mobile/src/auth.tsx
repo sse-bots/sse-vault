@@ -6,6 +6,7 @@ import * as LocalAuth from "expo-local-authentication";
 import { api, ApiError, setApiHandlers, tokens } from "./api";
 import { API_BASE, APP_SCHEME } from "./config";
 import { clearOffline, hasOffline, loadOffline, rememberPin, verifyOfflinePin } from "./offline";
+import { clearAutofillData } from "./autofill";
 import type { PinStatus, VaultUser } from "./types";
 
 export type Phase = "loading" | "signedOut" | "pinSetup" | "pinReset" | "locked" | "unlocked";
@@ -68,6 +69,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setOffline(false);
     await SecureStore.deleteItemAsync(K_SESSION).catch(() => {});
     await clearOffline();
+    await clearAutofillData();
     setPhase("signedOut");
   }, []);
 

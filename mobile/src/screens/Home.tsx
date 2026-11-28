@@ -35,6 +35,7 @@ export default function Home({
   onSecurity,
   onAuthTab,
   onTrash,
+  onSaveCaptured,
 }: {
   onOpen: (id: string) => void;
   onOpenGroup: (domainKey: string) => void;
@@ -42,8 +43,9 @@ export default function Home({
   onSecurity: () => void;
   onAuthTab: () => void;
   onTrash: () => void;
+  onSaveCaptured: (url: string, login: string, password: string) => void;
 }) {
-  const { items, groups, loading, error, refresh } = useVault();
+  const { items, groups, loading, error, refresh, pendingAutofillSaves, dismissPendingAutofillSaves } = useVault();
   const { user, offline } = useAuth();
   const { privacyBlur, setPrivacyBlur } = usePrefs();
 
@@ -142,6 +144,25 @@ export default function Home({
       </Text>
 
       <UpdateNotice />
+      {pendingAutofillSaves.length > 0 ? (
+        <Banner
+          icon="sparkles-outline"
+          color={c.ok}
+          title={`${pendingAutofillSaves.length} login${pendingAutofillSaves.length === 1 ? "" : "s"} captured by Autofill`}
+          body={`Ready to save ${pendingAutofillSaves[0].webDomain || pendingAutofillSaves[0].packageName || "captured login"} (${pendingAutofillSaves[0].username || "password"}).`}
+          action="Review & Save"
+          onAction={() => {
+            const first = pendingAutofillSaves[0];
+            void dismissPendingAutofillSaves();
+            onSaveCaptured(
+              first.webDomain || first.packageName || "",
+              first.username || "",
+              first.password || ""
+            );
+          }}
+          onClose={() => void dismissPendingAutofillSaves()}
+        />
+      ) : null}
 
       {problems > 0 && !offline ? (
         <Banner
