@@ -15,6 +15,8 @@ export interface VaultPinStatus {
   autoLockMinutes: number;
   failedAttempts: number;
   lockedUntil: string | null;
+  hasWebAuthn?: boolean;
+  webAuthnCount?: number;
 }
 
 function getSigningSecret(): string {
@@ -192,12 +194,18 @@ export async function getVaultPinStatus(
   }
   const unlocked = verifyPinUnlockToken(token, userId, pinVersion);
 
+  const creds = Array.isArray(doc.webauthnCredentials)
+    ? doc.webauthnCredentials
+    : [];
+
   return {
     hasPin: true,
     unlocked,
     autoLockMinutes,
     failedAttempts,
     lockedUntil: isCooldown && lockedUntilDate ? lockedUntilDate.toISOString() : null,
+    hasWebAuthn: creds.length > 0,
+    webAuthnCount: creds.length,
   };
 }
 

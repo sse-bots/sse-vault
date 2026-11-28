@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  Modal,
   Pressable,
   ScrollView,
   Text,
@@ -56,7 +57,7 @@ export default function Detail({
   onGoHome: () => void;
   onConnectNew: (parentId: string) => void;
 }) {
-  const { items, refresh } = useVault();
+  const { items, refresh, updateItemSafe, toggleCodeSafe, deleteItemSafe } = useVault();
   const { offline } = useAuth();
   const { privacyBlur } = usePrefs();
   const item = items.find((i) => i.id === id);
@@ -68,6 +69,13 @@ export default function Detail({
   const [busyCodeId, setBusyCodeId] = useState<string | null>(null);
   const [importingTxt, setImportingTxt] = useState(false);
   const [oauthFilter, setOauthFilter] = useState("");
+  const [showHistory, setShowHistory] = useState(false);
+  const [revealCard, setRevealCard] = useState(false);
+  const [revealCf, setRevealCf] = useState<Record<string, boolean>>({});
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareExp, setShareExp] = useState<"10" | "60" | "1440">("60");
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [shareBusy, setShareBusy] = useState(false);
 
   const parent = useMemo(
     () => (item ? findParentOAuthAccount(item, items) : null),
@@ -122,28 +130,18 @@ export default function Detail({
     toast.show(`${what} copied · clears in 30s`);
   };
 
-  const act = async (fn: () => Promise<unknown>) => {
-    try {
-      await fn();
-      await refresh();
-    } catch (e) {
-      Alert.alert("Error", (e as Error).message);
-    }
-  };
-
   const confirmDelete = () =>
     Alert.alert(
-      "Delete this item?",
-      `${displayTitle} will be permanently removed from ${item.appName}.`,
+      "Move to Trash?",
+      `${displayTitle} will stay recoverable in Trash for 30 days.`,
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Delete",
+          text: "Move to Trash",
           style: "destructive",
           onPress: async () => {
             try {
-              await api.deleteItem(item.id);
-              await refresh();
+              await deleteItemSafe(item.id);
               onBack();
             } catch (e) {
               Alert.alert("Error", (e as Error).message);
@@ -156,15 +154,10 @@ export default function Detail({
   const handleUseCode = async (k: SecurityCode) => {
     if (k.used || k.locked || busyCodeId) return;
     if (k.code) await copySecret(k.code);
-    if (offline) {
-      toast.show("Copied (read-only offline)");
-      return;
-    }
     setBusyCodeId(k.id);
     try {
-      await api.toggleCode(item.id, k.id, true);
-      await refresh();
-      toast.show("Security key copied & masked!");
+      await toggleCodeSafe(item.id, k.id, true);
+      toast.show(offline ? "Copied & queued for sync!" : "Security key copied & masked!");
     } catch (e) {
       Alert.alert("Error", (e as Error).message);
     } finally {
@@ -174,15 +167,10 @@ export default function Detail({
 
   const handleRestoreCode = async (k: SecurityCode) => {
     if (!k.used || busyCodeId) return;
-    if (offline) {
-      toast.show("Read-only offline");
-      return;
-    }
     setBusyCodeId(k.id);
     try {
-      await api.toggleCode(item.id, k.id, false);
-      await refresh();
-      toast.show("Security code restored.");
+      await toggleCodeSafe(item.id, k.id, false);
+      toast.show(offline ? "Restored (queued for sync)" : "Security code restored.");
     } catch (e) {
       Alert.alert("Error", (e as Error).message);
     } finally {
@@ -234,25 +222,27 @@ export default function Detail({
         <IconButton icon="chevron-back" onPress={onBack} label="Back" />
         <View style={{ flex: 1 }} />
         {!offline && (
-          <>
-            <IconButton
-              icon={item.favorite ? "star" : "star-outline"}
-              color={item.favorite ? c.accent : c.text}
-              onPress={() =>
-                act(() =>
-                  api.updateItem(item.id, { favorite: !item.favorite })
-                )
-              }
-            />
-            <IconButton icon="create-outline" onPress={onEdit} label="Edit" />
-            <IconButton
-              icon="trash-outline"
-              color={c.danger}
-              onPress={confirmDelete}
-              label="Delete"
-            />
-          </>
+          <IconButton
+            icon="share-social-outline"
+            onPress={() => {
+              setShareUrl(null);
+              setShareOpen(true);
+            }}
+            label="Share once"
+          />
         )}
+        <IconButton
+          icon={item.favorite ? "star" : "star-outline"}
+          color={item.favorite ? c.accent : c.text}
+          onPress={() => void updateItemSafe(item.id, { favorite: !item.favorite })}
+        />
+        <IconButton icon="create-outline" onPress={onEdit} label="Edit" />
+        <IconButton
+          icon="trash-outline"
+          color={c.danger}
+          onPress={confirmDelete}
+          label="Move to Trash"
+        />
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60, gap: 14 }}>
@@ -1079,6 +1069,137 @@ export default function Detail({
             )}
           </Inset>
 
+          {/* Payment Card Details */}
+          {item.entryType === "card" && item.cardDetails ? (
+            <Inset style={{ gap: 8 }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                <Text style={{ color: c.accentLabel, fontSize: 10, fontWeight: "800", letterSpacing: 0.7 }}>
+                  PAYMENT CARD
+                </Text>
+                <Pressable onPress={() => setRevealCard((v) => !v)}>
+                  <Text style={{ color: c.muted, fontSize: 11, fontWeight: "700" }}>
+                    {revealCard ? "Hide" : "Reveal"}
+                  </Text>
+                </Pressable>
+              </View>
+              {item.cardDetails.cardholderName ? (
+                <Text style={{ color: c.text, fontSize: 14, fontWeight: "800" }}>
+                  {item.cardDetails.cardholderName}
+                </Text>
+              ) : null}
+              {item.cardDetails.cardNumber ? (
+                <Pressable
+                  onPress={() => copy(item.cardDetails!.cardNumber, "Card number")}
+                  style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}
+                >
+                  <Text style={{ color: c.text, fontSize: 16, fontWeight: "800", fontFamily: "monospace", letterSpacing: 1.5 }}>
+                    {revealCard && !privacyBlur
+                      ? item.cardDetails.cardNumber
+                      : `•••• •••• •••• ${item.cardDetails.cardNumber.replace(/\s+/g, "").slice(-4)}`}
+                  </Text>
+                  <Ionicons name="copy-outline" size={16} color={c.muted} />
+                </Pressable>
+              ) : null}
+              <View style={{ flexDirection: "row", gap: 16 }}>
+                {item.cardDetails.expiry ? (
+                  <Text style={{ color: c.muted, fontSize: 12, fontFamily: "monospace" }}>
+                    EXP {item.cardDetails.expiry}
+                  </Text>
+                ) : null}
+                {item.cardDetails.cvv ? (
+                  <Pressable onPress={() => copy(item.cardDetails!.cvv, "CVV")}>
+                    <Text style={{ color: c.muted, fontSize: 12, fontFamily: "monospace" }}>
+                      CVV {revealCard && !privacyBlur ? item.cardDetails.cvv : "•••"}
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            </Inset>
+          ) : null}
+
+          {/* Custom Fields & Developer Secrets */}
+          {item.customFields && item.customFields.length > 0 ? (
+            <Inset style={{ padding: 0, overflow: "hidden" }}>
+              <View style={{ paddingHorizontal: 13, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: c.border }}>
+                <Text style={{ color: c.accentLabel, fontSize: 10, fontWeight: "800", letterSpacing: 0.7 }}>
+                  CUSTOM FIELDS ({item.customFields.length})
+                </Text>
+              </View>
+              {item.customFields.map((cf, idx) => {
+                const vis = !cf.hidden || Boolean(revealCf[cf.id]);
+                return (
+                  <CredentialRow
+                    key={cf.id}
+                    icon="layers-outline"
+                    label={cf.label.toUpperCase()}
+                    value={vis && !privacyBlur ? cf.value : "••••••••••••"}
+                    onCopy={() => copy(cf.value, cf.label)}
+                    extra={
+                      cf.hidden ? (
+                        <Pressable
+                          onPress={() => setRevealCf((p) => ({ ...p, [cf.id]: !p[cf.id] }))}
+                          style={{ padding: 6 }}
+                        >
+                          <Ionicons name={vis ? "eye-off-outline" : "eye-outline"} size={16} color={c.muted} />
+                        </Pressable>
+                      ) : undefined
+                    }
+                    last={idx === item.customFields.length - 1}
+                  />
+                );
+              })}
+            </Inset>
+          ) : null}
+
+          {/* Collapsible Password History Drawer */}
+          {item.passwordHistory && item.passwordHistory.length > 0 ? (
+            <Inset style={{ gap: 8 }}>
+              <Pressable
+                onPress={() => setShowHistory((v) => !v)}
+                style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}
+              >
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Ionicons name="time-outline" size={14} color={c.accentLabel} />
+                  <Text style={{ color: c.text, fontSize: 12, fontWeight: "800" }}>
+                    Password History ({item.passwordHistory.length})
+                  </Text>
+                </View>
+                <Ionicons name={showHistory ? "chevron-up" : "chevron-down"} size={16} color={c.muted} />
+              </Pressable>
+              {showHistory ? (
+                <View style={{ gap: 6 }}>
+                  {item.passwordHistory.map((h, idx) => (
+                    <Pressable
+                      key={idx}
+                      onPress={() => h.password && copy(h.password, "Previous password")}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        backgroundColor: c.card,
+                        borderWidth: 1,
+                        borderColor: c.border,
+                        borderRadius: radius.md,
+                        paddingHorizontal: 10,
+                        paddingVertical: 8,
+                      }}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text numberOfLines={1} style={{ color: c.text, fontSize: 12, fontFamily: "monospace", fontWeight: "700" }}>
+                          {h.locked ? "LOCKED" : privacyBlur ? "••••••••" : h.password || "—"}
+                        </Text>
+                        <Text style={{ color: c.faint, fontSize: 10 }}>
+                          {new Date(h.changedAt).toLocaleString()}
+                        </Text>
+                      </View>
+                      {h.password ? <Ionicons name="copy-outline" size={14} color={c.muted} /> : null}
+                    </Pressable>
+                  ))}
+                </View>
+              ) : null}
+            </Inset>
+          ) : null}
+
           {item.notes ? (
             <Inset>
               <Text
@@ -1453,6 +1574,83 @@ export default function Detail({
         </Text>
       </ScrollView>
 
+      <Modal visible={shareOpen} transparent animationType="fade" onRequestClose={() => setShareOpen(false)}>
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.72)", justifyContent: "center", padding: 20 }}>
+          <Card style={{ gap: 12 }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <Text style={{ color: c.text, fontSize: 16, fontWeight: "800" }}>One-Time Secret Link</Text>
+              <IconButton icon="close" onPress={() => setShareOpen(false)} />
+            </View>
+            <Text style={{ color: c.muted, fontSize: 12 }}>
+              Self-destructs after 1 view or when the timer expires.
+            </Text>
+            {!shareUrl ? (
+              <>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  {(
+                    [
+                      { id: "10", label: "10m" },
+                      { id: "60", label: "1h" },
+                      { id: "1440", label: "24h" },
+                    ] as const
+                  ).map((o) => (
+                    <Pressable
+                      key={o.id}
+                      onPress={() => setShareExp(o.id)}
+                      style={{
+                        flex: 1,
+                        alignItems: "center",
+                        paddingVertical: 10,
+                        borderRadius: radius.md,
+                        backgroundColor: shareExp === o.id ? c.accentSoft : c.card2,
+                        borderWidth: 1,
+                        borderColor: shareExp === o.id ? c.accent : c.border,
+                      }}
+                    >
+                      <Text style={{ color: shareExp === o.id ? c.accentLabel : c.text, fontWeight: "800", fontSize: 12 }}>
+                        {o.label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <Button
+                  title="Generate One-Time Link"
+                  icon="share-social-outline"
+                  loading={shareBusy}
+                  onPress={async () => {
+                    setShareBusy(true);
+                    try {
+                      const res = await api.createShare(item.id, shareExp);
+                      setShareUrl(res.url);
+                    } catch (e) {
+                      Alert.alert("Error", (e as Error).message);
+                    } finally {
+                      setShareBusy(false);
+                    }
+                  }}
+                />
+              </>
+            ) : (
+              <>
+                <Inset>
+                  <Text selectable style={{ color: c.accentLabel, fontSize: 11, fontFamily: "monospace" }}>
+                    {shareUrl}
+                  </Text>
+                </Inset>
+                <Button
+                  title="Copy Link"
+                  icon="copy-outline"
+                  onPress={async () => {
+                    await copySecret(shareUrl);
+                    toast.show("Share link copied!");
+                    setShareOpen(false);
+                  }}
+                />
+              </>
+            )}
+          </Card>
+        </View>
+      </Modal>
       <Toast message={toast.msg} />
     </View>
   );

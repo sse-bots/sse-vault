@@ -17,6 +17,7 @@ import {
 } from "@/lib/domain";
 import { serializeVaultDoc } from "@/lib/vault-serializer";
 import { resolveOAuthProviderDomain } from "@/lib/oauth-links";
+import { decryptVaultBackup } from "@/lib/backup-crypto";
 import type { StoredSecurityCode, VaultItemDTO } from "@/lib/vault-types";
 
 export const runtime = "nodejs";
@@ -33,7 +34,8 @@ const importCodeSchema = z.union([
 ]);
 
 const importEntrySchema = z.object({
-  url: z.string().trim().min(1).max(300),
+  entryType: z.enum(["login", "note", "card"]).optional().default("login"),
+  url: z.string().trim().max(300).optional().default(""),
   label: z.string().trim().max(80).optional().default(""),
   authType: z.enum(["password", "oauth"]).optional().default("password"),
   oauthProvider: z.string().trim().max(60).optional().default(""),
@@ -48,7 +50,7 @@ const importEntrySchema = z.object({
   password: z.string().max(512).optional().default(""),
   totpSecret: z.string().trim().max(512).optional().default(""),
   securityCodes: z.array(importCodeSchema).max(100).optional().default([]),
-  notes: z.string().trim().max(1000).optional().default(""),
+  notes: z.string().trim().max(5000).optional().default(""),
   favorite: z.boolean().optional().default(false),
 });
 
@@ -108,7 +110,93 @@ export async function POST(req: Request) {
   if (!guard.ok) return guard.response;
   const ctx = guard.session;
 
-  const body = await req.json().catch(() => null);
+  let body = await req.json().catch(() => null);
+  if (
+    body &&
+    typeof body === "object" &&
+    typeof (body as Record<string, unknown>).encryptedBackup === "string"
+  ) {
+    const rawEnc = String((body as Record<string, unknown>).encryptedBackup);
+    const pass = String((body as Record<string, unknown>).passphrase || "");
+    if (!pass.trim()) {
+      return NextResponse.json(
+        { error: "Enter the backup passphrase to unlock this .ssevault file." },
+        { status: 400, headers: NO_CACHE }
+      );
+    }
+    try {
+      const decryptedJson = decryptVaultBackup(rawEnc, pass);
+      const parsedJson: unknown = JSON.parse(decryptedJson);
+      const rawList: unknown[] = Array.isArray(parsedJson)
+        ? parsedJson
+        : parsedJson &&
+            typeof parsedJson === "object" &&
+            Array.isArray((parsedJson as { entries?: unknown[] }).entries)
+          ? (parsedJson as { entries: unknown[] }).entries
+          : [];
+      const mapped = rawList
+        .filter(
+          (x: unknown): x is Record<string, unknown> =>
+            Boolean(x && typeof x === "object")
+        )
+        .slice(0, 500)
+        .map((x) => ({
+          entryType:
+            x.entryType === "note" || x.entryType === "card"
+              ? x.entryType
+              : "login",
+          url: String(
+            x.url ||
+              (x.domainKey
+                ? `https://${x.domainKey}`
+                : "https://secure-note.local")
+          ),
+          label: String(x.label || x.appName || ""),
+          authType: x.authType === "oauth" ? "oauth" : "password",
+          oauthProvider: String(x.oauthProvider || ""),
+          oauthProviderDomain: String(x.oauthProviderDomain || ""),
+          category: String(x.category || "personal"),
+          hasPasskey: Boolean(x.hasPasskey),
+          email: String(x.email || ""),
+          username: String(x.username || ""),
+          password: String(x.password || ""),
+          totpSecret: String(x.totpSecret || ""),
+          securityCodes: Array.isArray(x.securityCodes)
+            ? (x.securityCodes as unknown[])
+                .map((sc: unknown) =>
+                  typeof sc === "string"
+                    ? sc
+                    : sc &&
+                        typeof sc === "object" &&
+                        typeof (sc as Record<string, unknown>).code === "string"
+                      ? {
+                          code: String((sc as Record<string, unknown>).code),
+                          used: Boolean((sc as Record<string, unknown>).used),
+                        }
+                      : null
+                )
+                .filter(
+                  (
+                    item: string | { code: string; used: boolean } | null
+                  ): item is string | { code: string; used: boolean } =>
+                    item !== null
+                )
+            : [],
+          notes: String(x.notes || ""),
+          favorite: Boolean(x.favorite),
+        }));
+      body = {
+        mode: (body as Record<string, unknown>).mode || "preview",
+        conflictStrategy: (body as Record<string, unknown>).conflictStrategy || "skip",
+        entries: mapped,
+      };
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "Could not decrypt .ssevault backup." },
+        { status: 400, headers: NO_CACHE }
+      );
+    }
+  }
   const parsed = importPayloadSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
@@ -120,7 +208,7 @@ export async function POST(req: Request) {
   const { mode, conflictStrategy, entries } = parsed.data;
   const { vaultItems } = await getVaultCollections();
   const existingDocs = await vaultItems
-    .find({ ownerUserId: ctx.userId })
+    .find({ ownerUserId: ctx.userId, $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }] })
     .toArray();
   const existingItems = existingDocs.map(serializeVaultDoc);
 
@@ -343,6 +431,7 @@ export async function POST(req: Request) {
 
     docsToInsert.push({
       ownerUserId: ctx.userId,
+      entryType: d.entryType,
       domainKey: row.domainKey,
       appName: row.appName,
       label: d.label.trim() || row.appName,
@@ -371,6 +460,7 @@ export async function POST(req: Request) {
       favorite: Boolean(d.favorite),
       keyFingerprint,
       ...(storeHex ? { hexcode: activeHex } : {}),
+      deletedAt: null,
       createdAt: now,
       updatedAt: now,
     });

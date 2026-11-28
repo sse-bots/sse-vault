@@ -7,6 +7,8 @@ export type Category =
   | "social"
   | "other";
 
+export type EntryType = "login" | "note" | "card";
+
 export const CATEGORIES: { id: Category; label: string; color: string }[] = [
   { id: "personal", label: "Personal", color: "#f59e0b" },
   { id: "dev", label: "Developer", color: "#06b6d4" },
@@ -36,8 +38,30 @@ export interface SecurityCode {
   locked: boolean;
 }
 
+export interface CustomField {
+  id: string;
+  label: string;
+  value: string;
+  hidden: boolean;
+}
+
+export interface CardDetails {
+  cardholderName: string;
+  cardNumber: string;
+  expiry: string;
+  cvv: string;
+  billingZip: string;
+}
+
+export interface PasswordHistoryItem {
+  password: string | null;
+  changedAt: string;
+  locked: boolean;
+}
+
 export interface VaultItem {
   id: string;
+  entryType: EntryType;
   domainKey: string;
   appName: string;
   label: string;
@@ -53,6 +77,9 @@ export interface VaultItem {
   password: string | null;
   totpSecret: string | null;
   securityCodes: SecurityCode[];
+  customFields: CustomField[];
+  cardDetails: CardDetails | null;
+  passwordHistory: PasswordHistoryItem[];
   notes: string | null;
   favorite: boolean;
   decryptionStatus:
@@ -60,7 +87,21 @@ export interface VaultItem {
     | "recovered_db_hex"
     | "recovered_legacy_env"
     | "locked";
+  deletedAt?: string | null;
   updatedAt: string;
+}
+
+export interface TrashedItem extends VaultItem {
+  daysRemaining: number;
+}
+
+export interface ActivityEvent {
+  id: string;
+  event: string;
+  label: string;
+  client: "web" | "native";
+  userAgent: string | null;
+  createdAt: string;
 }
 
 export interface PinStatus {
@@ -81,6 +122,7 @@ export interface VaultUser {
 }
 
 export interface ItemInput {
+  entryType?: EntryType;
   label?: string;
   url?: string;
   expectedDomain?: string;
@@ -94,6 +136,8 @@ export interface ItemInput {
   username?: string;
   password?: string;
   totpSecret?: string;
+  customFields?: CustomField[];
+  cardDetails?: CardDetails | null;
   notes?: string;
   favorite?: boolean;
   securityCodesMode?: "keep" | "append" | "replace";

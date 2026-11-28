@@ -13,11 +13,14 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Crypto from "expo-crypto";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
-import { api } from "../api";
+import { QrScannerModal, pickAndDecodeQrImage, type ScannedTotpResult } from "../QrScannerModal";
 import { useVault } from "../vault";
 import {
   CATEGORIES,
+  type CardDetails,
   type Category,
+  type CustomField,
+  type EntryType,
   type ItemInput,
   type VaultItem,
 } from "../types";
@@ -74,7 +77,7 @@ export default function Form({
   presetParentId?: string;
   onClose: () => void;
 }) {
-  const { items, groups, refresh } = useVault();
+  const { items, groups, createItemSafe, updateItemSafe } = useVault();
   const now = useNow();
 
   const existing = id ? items.find((i) => i.id === id) : undefined;
@@ -102,6 +105,24 @@ export default function Form({
     }
     return "google.com";
   }, [presetParent, existing, initialResolvedParent]);
+
+  const [entryType, setEntryType] = useState<EntryType>(
+    existing?.entryType || "login"
+  );
+  const [cardDetails, setCardDetails] = useState<CardDetails>(
+    existing?.cardDetails || {
+      cardholderName: "",
+      cardNumber: "",
+      expiry: "",
+      cvv: "",
+      billingZip: "",
+    }
+  );
+  const [customFields, setCustomFields] = useState<CustomField[]>(
+    existing?.customFields || []
+  );
+  const [qrModalOpen, setQrModalOpen] = useState(false);
+  const [qrNotice, setQrNotice] = useState<string | null>(null);
 
   const [url, setUrl] = useState(
     existing?.url ||
@@ -295,7 +316,8 @@ export default function Form({
 
     setQuickCreating(true);
     try {
-      const res = await api.createItem({
+      const created = await createItemSafe({
+        entryType: "login",
         url: `https://${targetDomain}`,
         label: isCustomProvider
           ? customProviderName.trim() || getAppNameForDomain(targetDomain)
@@ -306,9 +328,8 @@ export default function Form({
         password: quickPassword,
         category,
       });
-      await refresh();
-      if (res?.item) {
-        connectVaultAccount(res.item);
+      if (created) {
+        connectVaultAccount(created);
       }
       setQuickEmail("");
       setQuickUsername("");
@@ -319,6 +340,15 @@ export default function Form({
     } finally {
       setQuickCreating(false);
     }
+  }
+
+  function applyScannedQr(res: ScannedTotpResult) {
+    setTotpSecret(res.secretOrUri);
+    if (res.issuer && !label.trim()) setLabel(res.issuer);
+    if (res.account && !email.trim() && res.account.includes("@")) {
+      setEmail(res.account);
+    }
+    setQrNotice("TOTP QR decoded in memory — live code active below!");
   }
 
   async function pickTxtBackupFile() {
@@ -366,7 +396,7 @@ export default function Form({
 
   async function handleSave() {
     setError(null);
-    if (!url.trim()) {
+    if (entryType === "login" && !url.trim()) {
       setError("Website URL is required (e.g. github.com or vercel.com).");
       return;
     }
@@ -381,7 +411,7 @@ export default function Form({
       linkedAccountObj?.username ||
       "";
 
-    if (authType === "oauth" && !resolvedOAuthEmail) {
+    if (entryType === "login" && authType === "oauth" && !resolvedOAuthEmail) {
       setError(
         "Select an existing provider account or enter the email used for OAuth sign-in."
       );
@@ -414,10 +444,21 @@ export default function Form({
       finalCodes = [];
     }
 
+    const resolvedUrl =
+      entryType === "login"
+        ? url.trim()
+        : url.trim() ||
+          (entryType === "note"
+            ? "https://secure-note.local"
+            : "https://payment-cards.local");
+
     const payload: ItemInput = {
+      entryType,
       label: label.trim(),
-      url: url.trim(),
-      expectedDomain: lockedDomain || undefined,
+      url: resolvedUrl,
+      expectedDomain: entryType === "login" ? lockedDomain || undefined : undefined,
+      customFields: customFields.filter((f) => f.label.trim() || f.value.trim()),
+      cardDetails: entryType === "card" ? cardDetails : null,
       authType,
       oauthProvider: authType === "oauth" ? resolvedOAuthProvider : "",
       oauthProviderDomain: authType === "oauth" ? resolvedOAuthDomain : "",
@@ -438,11 +479,10 @@ export default function Form({
     setSaving(true);
     try {
       if (existing) {
-        await api.updateItem(existing.id, payload);
+        await updateItemSafe(existing.id, payload);
       } else {
-        await api.createItem(payload);
+        await createItemSafe(payload);
       }
-      await refresh();
       onClose();
     } catch (e) {
       const msg = (e as Error).message || "Could not save vault entry.";
@@ -558,6 +598,63 @@ export default function Form({
           </View>
         ) : null}
 
+        {/* 0. Entry Type Switcher (Login | Secure Note | Card) */}
+        {!lockedDomain && !presetParent ? (
+          <View
+            style={{
+              flexDirection: "row",
+              gap: 6,
+              backgroundColor: c.card2,
+              borderWidth: 1,
+              borderColor: c.border,
+              borderRadius: radius.lg,
+              padding: 4,
+              marginBottom: 14,
+            }}
+          >
+            {(
+              [
+                { id: "login", label: "Login", icon: "globe-outline" },
+                { id: "note", label: "Note", icon: "document-text-outline" },
+                { id: "card", label: "Card", icon: "card-outline" },
+              ] as const
+            ).map((t) => {
+              const active = entryType === t.id;
+              return (
+                <Pressable
+                  key={t.id}
+                  onPress={() => setEntryType(t.id)}
+                  style={{
+                    flex: 1,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 5,
+                    paddingVertical: 9,
+                    borderRadius: radius.md,
+                    backgroundColor: active ? c.accent : "transparent",
+                  }}
+                >
+                  <Ionicons
+                    name={t.icon}
+                    size={14}
+                    color={active ? c.accentText : c.muted}
+                  />
+                  <Text
+                    style={{
+                      color: active ? c.accentText : c.muted,
+                      fontSize: 12,
+                      fontWeight: "800",
+                    }}
+                  >
+                    {t.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
+
         {/* 1. Website URL + Account Label + Live Segregation Pill */}
         <View
           style={{
@@ -670,7 +767,60 @@ export default function Form({
           </Inset>
         ) : null}
 
+        {/* Payment Card Fields (when Entry Type = Card) */}
+        {entryType === "card" ? (
+          <Inset style={{ gap: 6, marginBottom: 14 }}>
+            <Text style={{ color: c.accentLabel, fontSize: 11, fontWeight: "800", letterSpacing: 0.6 }}>
+              ENCRYPTED PAYMENT CARD DETAILS
+            </Text>
+            <Field
+              label="Cardholder Name"
+              value={cardDetails.cardholderName}
+              onChangeText={(v) => setCardDetails((p) => ({ ...p, cardholderName: v }))}
+              placeholder="Name on card"
+              autoCapitalize="words"
+            />
+            <Field
+              label="Card Number"
+              value={cardDetails.cardNumber}
+              onChangeText={(v) => setCardDetails((p) => ({ ...p, cardNumber: v }))}
+              placeholder="4532 •••• •••• ••••"
+              keyboardType="numeric"
+              style={{ fontFamily: "monospace" }}
+            />
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <View style={{ flex: 1 }}>
+                <Field
+                  label="Expiry"
+                  value={cardDetails.expiry}
+                  onChangeText={(v) => setCardDetails((p) => ({ ...p, expiry: v }))}
+                  placeholder="MM/YY"
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Field
+                  label="CVV"
+                  value={cardDetails.cvv}
+                  onChangeText={(v) => setCardDetails((p) => ({ ...p, cvv: v }))}
+                  placeholder="•••"
+                  secureTextEntry
+                  keyboardType="numeric"
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Field
+                  label="ZIP / PIN"
+                  value={cardDetails.billingZip}
+                  onChangeText={(v) => setCardDetails((p) => ({ ...p, billingZip: v }))}
+                  placeholder="400001"
+                />
+              </View>
+            </View>
+          </Inset>
+        ) : null}
+
         {/* 2. Login Method Switcher (Exact Website 2-Tab Pill) */}
+        {entryType === "login" ? (<>
         <Text
           style={{
             color: c.muted,
@@ -1413,6 +1563,8 @@ export default function Form({
           </View>
         )}
 
+        </>) : null}
+
         {/* 3. Security Extras Checkboxes (Exact 3 Website Checkboxes!) */}
         <Text
           style={{
@@ -1449,14 +1601,81 @@ export default function Form({
           />
         </View>
 
-        {/* Conditional TOTP Secret + Live Preview */}
+        {/* Conditional TOTP Secret + Camera Scanner + Gallery QR Image Upload + Live Preview */}
         {enableTotp ? (
           <Inset style={{ marginBottom: 14, gap: 8 }}>
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <Pressable
+                onPress={() => setQrModalOpen(true)}
+                style={{
+                  flex: 1,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6,
+                  backgroundColor: c.card,
+                  borderWidth: 1,
+                  borderColor: c.info + "66",
+                  borderRadius: radius.md,
+                  paddingVertical: 10,
+                }}
+              >
+                <Ionicons name="qr-code-outline" size={16} color={c.info} />
+                <Text style={{ color: c.info, fontSize: 12, fontWeight: "800" }}>
+                  Scan QR
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={async () => {
+                  const res = await pickAndDecodeQrImage();
+                  if (res) applyScannedQr(res);
+                }}
+                style={{
+                  flex: 1,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6,
+                  backgroundColor: c.card,
+                  borderWidth: 1,
+                  borderColor: c.accentBorder,
+                  borderRadius: radius.md,
+                  paddingVertical: 10,
+                }}
+              >
+                <Ionicons name="image-outline" size={16} color={c.accentLabel} />
+                <Text style={{ color: c.accentLabel, fontSize: 12, fontWeight: "800" }}>
+                  Upload QR Image
+                </Text>
+              </Pressable>
+            </View>
+
+            {qrNotice ? (
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 6,
+                  backgroundColor: c.ok + "1a",
+                  borderWidth: 1,
+                  borderColor: c.ok + "55",
+                  borderRadius: radius.md,
+                  padding: 9,
+                }}
+              >
+                <Ionicons name="checkmark-circle" size={14} color={c.ok} />
+                <Text style={{ color: c.ok, fontSize: 11, fontWeight: "700", flex: 1 }}>
+                  {qrNotice}
+                </Text>
+              </View>
+            ) : null}
+
             <Field
               label="TOTP Secret Key or otpauth:// URI"
               value={totpSecret}
               onChangeText={setTotpSecret}
-              placeholder="e.g. JBSWY3DPEHPK3PXP or otpauth://totp/..."
+              placeholder="e.g. JBSWY3DPEHPK3PXP or scan / upload QR above..."
               style={{ fontFamily: "monospace" }}
             />
             {previewTotpCfg ? (
@@ -1761,6 +1980,107 @@ export default function Form({
           </Inset>
         ) : null}
 
+        {/* 3.5 Custom Fields & Developer Secrets */}
+        <Inset style={{ gap: 10, marginBottom: 14 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            <Text style={{ color: c.text, fontSize: 12, fontWeight: "800" }}>
+              Custom Fields &amp; Dev Secrets ({customFields.length})
+            </Text>
+            <Pressable
+              onPress={() =>
+                setCustomFields((p) => [
+                  ...p,
+                  { id: `cf_${Date.now()}_${p.length}`, label: "", value: "", hidden: true },
+                ])
+              }
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 4,
+                backgroundColor: c.accentSoft,
+                paddingHorizontal: 9,
+                paddingVertical: 5,
+                borderRadius: radius.sm,
+              }}
+            >
+              <Ionicons name="add" size={13} color={c.accentLabel} />
+              <Text style={{ color: c.accentLabel, fontSize: 11, fontWeight: "800" }}>
+                Add Field
+              </Text>
+            </Pressable>
+          </View>
+          {customFields.length === 0 ? (
+            <Text style={{ color: c.muted, fontSize: 11 }}>
+              Store API keys, bot tokens, recovery emails, or .env snippets.
+            </Text>
+          ) : (
+            customFields.map((cf, idx) => (
+              <Card key={cf.id} style={{ padding: 10, gap: 6 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                  <TextInput
+                    value={cf.label}
+                    onChangeText={(v) =>
+                      setCustomFields((p) => p.map((x, i) => (i === idx ? { ...x, label: v } : x)))
+                    }
+                    placeholder="Label (e.g. API Key)"
+                    placeholderTextColor={c.faint}
+                    style={{
+                      flex: 1,
+                      backgroundColor: c.card2,
+                      borderColor: c.borderStrong,
+                      borderWidth: 1,
+                      borderRadius: radius.sm,
+                      color: c.text,
+                      paddingHorizontal: 10,
+                      paddingVertical: 7,
+                      fontSize: 12,
+                    }}
+                  />
+                  <Pressable
+                    onPress={() =>
+                      setCustomFields((p) => p.map((x, i) => (i === idx ? { ...x, hidden: !x.hidden } : x)))
+                    }
+                    style={{ padding: 6 }}
+                  >
+                    <Ionicons
+                      name={cf.hidden ? "eye-off-outline" : "eye-outline"}
+                      size={16}
+                      color={cf.hidden ? c.accentLabel : c.muted}
+                    />
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setCustomFields((p) => p.filter((_, i) => i !== idx))}
+                    style={{ padding: 6 }}
+                  >
+                    <Ionicons name="trash-outline" size={16} color={c.danger} />
+                  </Pressable>
+                </View>
+                <TextInput
+                  value={cf.value}
+                  secureTextEntry={cf.hidden}
+                  onChangeText={(v) =>
+                    setCustomFields((p) => p.map((x, i) => (i === idx ? { ...x, value: v } : x)))
+                  }
+                  placeholder="Value / Secret"
+                  placeholderTextColor={c.faint}
+                  autoCapitalize="none"
+                  style={{
+                    backgroundColor: c.card2,
+                    borderColor: c.borderStrong,
+                    borderWidth: 1,
+                    borderRadius: radius.sm,
+                    color: c.text,
+                    paddingHorizontal: 10,
+                    paddingVertical: 8,
+                    fontSize: 12,
+                    fontFamily: "monospace",
+                  }}
+                />
+              </Card>
+            ))
+          )}
+        </Inset>
+
         {/* 4. Category Pills + Encrypted Notes + Favorite Checkbox */}
         <Text
           style={{
@@ -1857,6 +2177,11 @@ export default function Form({
           style={{ flex: 2, height: 44 }}
         />
       </View>
+      <QrScannerModal
+        visible={qrModalOpen}
+        onClose={() => setQrModalOpen(false)}
+        onScanned={applyScannedQr}
+      />
     </KeyboardAvoidingView>
   );
 }

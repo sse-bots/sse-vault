@@ -51,6 +51,8 @@ const DOMAIN_ALIASES: Record<string, string> = {
 };
 
 const KNOWN_APP_NAMES: Record<string, string> = {
+  "secure-note.local": "Secure Notes",
+  "payment-cards.local": "Payment Cards",
   "google.com": "Google",
   "github.com": "GitHub",
   "discord.com": "Discord",

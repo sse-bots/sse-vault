@@ -6,6 +6,12 @@ import {
   AlertTriangle,
   ArrowUpRight,
   Check,
+  ChevronDown,
+  CreditCard,
+  History,
+  Layers,
+  Share2,
+  StickyNote,
   Copy,
   Edit3,
   ExternalLink,
@@ -27,6 +33,7 @@ import {
 import { useVault } from "@/components/VaultContext";
 import { SiteIcon } from "@/components/SiteIcon";
 import { TotpLiveWidget } from "@/components/TotpLiveWidget";
+import { ShareSecretModal } from "@/components/ShareSecretModal";
 import { evaluatePasswordStrength } from "@/lib/domain";
 import { extractSecurityCodesFromText } from "@/lib/parse-codes";
 import {
@@ -64,6 +71,10 @@ export function VaultEntryCard({
   const quickTxtRef = useRef<HTMLInputElement | null>(null);
 
   const [showPassword, setShowPassword] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [revealedCf, setRevealedCf] = useState<Record<string, boolean>>({});
+  const [revealedCard, setRevealedCard] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [busyCodeId, setBusyCodeId] = useState<string | null>(null);
   const [uploadingTxt, setUploadingTxt] = useState(false);
@@ -117,7 +128,7 @@ export function VaultEntryCard({
     const identity = item.email || item.username || item.label;
     if (
       !confirm(
-        `Permanently delete "${identity}" from ${item.appName} along with all TOTP & recovery keys?`
+        `Move "${identity}" to the 30-day Trash Bin? You can restore it anytime within 30 days.`
       )
     ) {
       return;
@@ -130,7 +141,7 @@ export function VaultEntryCard({
       });
       if (res.ok) {
         removeItem(item.id);
-        showToast("Entry deleted from vault.");
+        showToast("Moved to Trash (recoverable for 30 days).");
         onAfterDelete?.();
       }
     } finally {
@@ -282,6 +293,14 @@ export function VaultEntryCard({
                 className="h-4 w-4"
                 fill={item.favorite ? "currentColor" : "none"}
               />
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowShareModal(true)}
+              title="Share once (self-destructing link)"
+              className="vault-text-muted rounded-xl p-2 transition hover:bg-amber-500/10 hover:text-amber-500"
+            >
+              <Share2 className="h-4 w-4" />
             </button>
             <button
               type="button"
@@ -750,16 +769,170 @@ export function VaultEntryCard({
           </Link>
         )}
 
+        {/* Payment Card Details Block */}
+        {item.entryType === "card" && item.cardDetails && (
+          <div className="vault-inset space-y-2.5 rounded-2xl p-3.5 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="inline-flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-amber-500">
+                <CreditCard className="h-3.5 w-3.5" />
+                Payment Card
+              </span>
+              <button
+                type="button"
+                onClick={() => setRevealedCard((v) => !v)}
+                className="vault-text-muted inline-flex items-center gap-1 text-[10px] font-bold hover:text-amber-500"
+              >
+                {revealedCard ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                {revealedCard ? "Hide" : "Reveal"}
+              </button>
+            </div>
+            {item.cardDetails.cardholderName && (
+              <div className="vault-text-primary font-bold">{item.cardDetails.cardholderName}</div>
+            )}
+            {item.cardDetails.cardNumber && (
+              <div className="flex items-center justify-between gap-2">
+                <span className={`vault-text-primary font-mono text-sm font-extrabold tracking-wider ${privacyBlur ? "blur-sm select-none" : ""}`}>
+                  {revealedCard
+                    ? item.cardDetails.cardNumber
+                    : `•••• •••• •••• ${item.cardDetails.cardNumber.replace(/\s+/g, "").slice(-4)}`}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => copyField("cardNum", item.cardDetails!.cardNumber, "Card number")}
+                  className="vault-text-muted rounded-lg p-1 hover:text-amber-500"
+                >
+                  {copiedField === "cardNum" ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                </button>
+              </div>
+            )}
+            <div className="flex flex-wrap items-center gap-4 font-mono text-[11px]">
+              {item.cardDetails.expiry && (
+                <span className="vault-text-secondary">EXP: <strong>{item.cardDetails.expiry}</strong></span>
+              )}
+              {item.cardDetails.cvv && (
+                <button
+                  type="button"
+                  onClick={() => copyField("cvv", item.cardDetails!.cvv, "CVV")}
+                  className="vault-text-secondary hover:text-amber-500"
+                >
+                  CVV: <strong>{revealedCard && !privacyBlur ? item.cardDetails.cvv : "•••"}</strong>
+                </button>
+              )}
+              {item.cardDetails.billingZip && (
+                <span className="vault-text-muted">ZIP: {item.cardDetails.billingZip}</span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Custom Fields & Developer Secrets */}
+        {item.customFields && item.customFields.length > 0 && (
+          <div className="vault-inset divide-y rounded-2xl">
+            <div className="vault-divider flex items-center gap-1.5 px-3.5 py-2 text-[10px] font-extrabold uppercase tracking-wider text-amber-500">
+              <Layers className="h-3 w-3" />
+              Custom Fields ({item.customFields.length})
+            </div>
+            {item.customFields.map((cf) => {
+              const isVisible = !cf.hidden || Boolean(revealedCf[cf.id]);
+              return (
+                <div key={cf.id} className="vault-divider flex items-center justify-between gap-2 px-3.5 py-2.5 text-xs">
+                  <div className="min-w-0">
+                    <div className="vault-text-muted text-[9px] font-bold uppercase tracking-wider">{cf.label}</div>
+                    <div className={`vault-text-primary break-all font-mono text-xs ${privacyBlur ? "blur-sm select-none" : ""}`}>
+                      {isVisible ? cf.value : "••••••••••••"}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    {cf.hidden && (
+                      <button
+                        type="button"
+                        onClick={() => setRevealedCf((p) => ({ ...p, [cf.id]: !p[cf.id] }))}
+                        className="vault-text-muted rounded-lg p-1.5 hover:text-amber-500"
+                      >
+                        {isVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => copyField(`cf_${cf.id}`, cf.value, cf.label)}
+                      className="vault-text-muted rounded-lg p-1.5 hover:text-amber-500"
+                    >
+                      {copiedField === `cf_${cf.id}` ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Collapsible Password History Drawer */}
+        {item.passwordHistory && item.passwordHistory.length > 0 && (
+          <div className="vault-inset rounded-2xl p-3">
+            <button
+              type="button"
+              onClick={() => setShowHistory((v) => !v)}
+              className="flex w-full items-center justify-between text-xs font-bold"
+            >
+              <span className="vault-text-secondary inline-flex items-center gap-1.5">
+                <History className="h-3.5 w-3.5 text-amber-500" />
+                Password History ({item.passwordHistory.length})
+              </span>
+              <ChevronDown className={`vault-text-muted h-4 w-4 transition ${showHistory ? "rotate-180" : ""}`} />
+            </button>
+            {showHistory && (
+              <div className="mt-2.5 space-y-1.5">
+                {item.passwordHistory.map((h, idx) => (
+                  <div key={idx} className="vault-card flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-[11px]">
+                    <div className="min-w-0">
+                      <div className={`vault-text-primary truncate font-mono font-semibold ${privacyBlur ? "blur-sm select-none" : ""}`}>
+                        {h.locked ? "LOCKED" : h.password || "—"}
+                      </div>
+                      <div className="vault-text-muted text-[9px]">
+                        Changed {new Date(h.changedAt).toLocaleString()}
+                      </div>
+                    </div>
+                    {h.password && (
+                      <button
+                        type="button"
+                        onClick={() => copyField(`hist_${idx}`, h.password!, "Previous password")}
+                        className="vault-text-muted shrink-0 rounded-lg p-1.5 hover:text-amber-500"
+                      >
+                        {copiedField === `hist_${idx}` ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {item.notes && (
-          <p
+          <div className="vault-inset rounded-xl px-3 py-2.5 text-xs">
+            {item.entryType === "note" && (
+              <div className="mb-1 inline-flex items-center gap-1 text-[10px] font-extrabold uppercase tracking-wider text-amber-500">
+                <StickyNote className="h-3 w-3" />
+                Secure Note
+              </div>
+            )}
+            <p
             className={`vault-inset vault-text-muted break-words rounded-xl px-3 py-2 text-[11px] ${
               privacyBlur ? "blur-sm select-none" : ""
             }`}
           >
             {item.notes}
-          </p>
+            </p>
+          </div>
         )}
       </div>
+      {showShareModal && (
+        <ShareSecretModal
+          itemId={item.id}
+          itemTitle={primaryTitle}
+          onClose={() => setShowShareModal(false)}
+        />
+      )}
     </article>
   );
 }

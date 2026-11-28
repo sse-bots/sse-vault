@@ -5,7 +5,7 @@ import * as FileSystem from "expo-file-system";
 import { api } from "../api";
 import { useVault } from "../vault";
 import { parsePasswordImportFile, type ImportParseResult } from "../lib/import-parser";
-import { Button, Card, Chip, IconButton, StatBox } from "../ui";
+import { Button, Card, Chip, Field, IconButton, StatBox } from "../ui";
 import { c } from "../theme";
 
 type Strategy = "skip" | "update" | "duplicate";
@@ -19,6 +19,9 @@ export default function Import({ onClose }: { onClose: () => void }) {
   const [strategy, setStrategy] = useState<Strategy>("skip");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null);
+  const [encRaw, setEncRaw] = useState<string | null>(null);
+  const [encName, setEncName] = useState("");
+  const [passphrase, setPassphrase] = useState("");
 
   const entriesFor = (p: ImportParseResult) => p.entries.slice(0, 500);
 
@@ -36,6 +39,15 @@ export default function Import({ onClose }: { onClose: () => void }) {
       setDone(null);
       const text = await FileSystem.readAsStringAsync(a.uri);
       await FileSystem.deleteAsync(a.uri, { idempotent: true }).catch(() => {});
+      const trimmed = text.trim();
+      if (a.name.toLowerCase().endsWith(".ssevault") || (trimmed.startsWith("{") && trimmed.includes('"sse-vault-encrypted"'))) {
+        setEncRaw(trimmed);
+        setEncName(a.name);
+        setParsed(null);
+        setSummary(null);
+        return;
+      }
+      setEncRaw(null);
       const p = parsePasswordImportFile(a.name, text);
       if (!p.entries.length) throw new Error("No usable entries were found in that file.");
       setFileName(a.name);
@@ -54,7 +66,45 @@ export default function Import({ onClose }: { onClose: () => void }) {
     try { setBusy(true); await preview(parsed, st); } catch (e) { Alert.alert("Error", (e as Error).message); } finally { setBusy(false); }
   };
 
+  const previewEncrypted = async () => {
+    if (!encRaw || !passphrase.trim()) return;
+    setBusy(true);
+    try {
+      const res = await api.importEntries({
+        mode: "preview",
+        conflictStrategy: strategy,
+        encryptedBackup: encRaw,
+        passphrase,
+      });
+      setSummary(res.summary);
+    } catch (e) {
+      Alert.alert("Could not unlock backup", (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const commit = async () => {
+    if (encRaw) {
+      setBusy(true);
+      try {
+        const res = await api.importEntries({
+          mode: "commit",
+          conflictStrategy: strategy,
+          encryptedBackup: encRaw,
+          passphrase,
+        });
+        await refresh();
+        setDone(`Imported ${res.importedCount}, updated ${res.updatedCount}, skipped ${res.skippedCount}.`);
+        setEncRaw(null);
+        setSummary(null);
+      } catch (e) {
+        Alert.alert("Import failed", (e as Error).message);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     if (!parsed) return;
     setBusy(true);
     try {
@@ -87,6 +137,22 @@ export default function Import({ onClose }: { onClose: () => void }) {
           <Button title={fileName ? "Choose a different file" : "Choose file"} icon="document-attach-outline" onPress={pick} loading={busy && !parsed} />
         </Card>
 
+        {encRaw && !summary && !done && (
+          <Card style={{ marginTop: 14, gap: 10 }}>
+            <Text style={{ color: c.ok, fontWeight: "800", fontSize: 14 }}>
+              Encrypted Backup: {encName}
+            </Text>
+            <Field
+              label="BACKUP PASSPHRASE"
+              value={passphrase}
+              onChangeText={setPassphrase}
+              placeholder="Enter passphrase..."
+              secureTextEntry
+            />
+            <Button title="Decrypt & Preview" icon="key-outline" loading={busy} onPress={previewEncrypted} />
+          </Card>
+        )}
+
         {done && (
           <Card style={{ marginTop: 12, borderColor: c.ok }}>
             <Text style={{ color: c.ok, fontWeight: "800" }}>Import complete</Text>
@@ -94,12 +160,12 @@ export default function Import({ onClose }: { onClose: () => void }) {
           </Card>
         )}
 
-        {parsed && summary && (
+        {(parsed || encRaw) && summary && (
           <View style={{ marginTop: 16 }}>
             <Text style={{ color: c.muted, marginBottom: 8 }}>
-              {fileName} · detected {parsed.detectedFormat}
+              {fileName} · detected {parsed ? parsed.detectedFormat : "SSE Vault Encrypted (.ssevault)"}
               {parsed.skippedMalformed ? ` · ${parsed.skippedMalformed} malformed rows skipped` : ""}
-              {parsed.entries.length > 500 ? " · only the first 500 entries are imported at a time" : ""}
+              {(parsed?.entries.length || 0) > 500 ? " · only the first 500 entries are imported at a time" : ""}
             </Text>
             <View style={{ flexDirection: "row", gap: 8 }}>
               <StatBox icon="add-circle" label="New" value={summary.newCount} color={c.ok} />

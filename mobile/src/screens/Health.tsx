@@ -6,13 +6,16 @@ import { useAuth } from "../auth";
 import { useVault } from "../vault";
 import { evaluatePasswordStrength } from "../lib/domain";
 import type { VaultItem } from "../types";
-import { Banner, Button, Card, Empty, SiteIcon, StatBox } from "../ui";
+import { Banner, Button, Card, Empty, Field, SiteIcon, StatBox } from "../ui";
 import { c, radius } from "../theme";
 
 export default function Health({ onOpen }: { onOpen: (id: string) => void }) {
   const { items, refresh } = useVault();
   const { offline } = useAuth();
   const [busy, setBusy] = useState(false);
+  const [oldHexKey, setOldHexKey] = useState("");
+  const [checkingBreach, setCheckingBreach] = useState(false);
+  const [breaches, setBreaches] = useState<{ checkedCount: number; compromised: Array<{ id: string; count: number }> } | null>(null);
 
   const audit = useMemo(() => {
     const weak: VaultItem[] = [];
@@ -47,16 +50,32 @@ export default function Health({ onOpen }: { onOpen: (id: string) => void }) {
   const color = audit.score >= 80 ? c.ok : audit.score >= 55 ? c.warn : c.danger;
   const clean = !audit.weak.length && !audit.reused.length && !audit.lowKeys.length && !audit.locked && !audit.recovered;
 
-  const reencrypt = async () => {
+  const reencrypt = async (manualKey?: string) => {
     setBusy(true);
     try {
-      await api.reencrypt();
+      const res = await api.reencrypt(manualKey?.trim() || undefined);
+      setOldHexKey("");
       await refresh();
-      Alert.alert("Done", "Entries were re-encrypted with the current key.");
+      Alert.alert(
+        "Re-encryption complete",
+        `Migrated ${res.migratedCount} entry(ies). ${res.stillLockedCount > 0 ? `${res.stillLockedCount} still locked.` : "All entries unlocked!"}`
+      );
     } catch (e) {
       Alert.alert("Couldn't re-encrypt", (e as Error).message);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const runBreachCheck = async () => {
+    setCheckingBreach(true);
+    try {
+      const res = await api.breachCheck();
+      setBreaches({ checkedCount: res.checkedCount, compromised: res.compromised || [] });
+    } catch (e) {
+      Alert.alert("Breach check failed", (e as Error).message);
+    } finally {
+      setCheckingBreach(false);
     }
   };
 
@@ -88,6 +107,36 @@ export default function Health({ onOpen }: { onOpen: (id: string) => void }) {
         <StatBox icon="key" label="Low keys" value={audit.lowKeys.length} color="#f97316" />
       </View>
 
+      {/* HIBP Breach Check */}
+      {!offline && (
+        <View style={{ marginTop: 14, gap: 10 }}>
+          <Button
+            title="Check Breaches (HIBP)"
+            icon="flame-outline"
+            loading={checkingBreach}
+            onPress={() => void runBreachCheck()}
+            style={{ height: 44 }}
+          />
+          {breaches ? (
+            <Card style={{ borderColor: breaches.compromised.length ? c.danger : c.ok }}>
+              <Text style={{ color: breaches.compromised.length ? c.danger : c.ok, fontWeight: "800", fontSize: 13 }}>
+                {breaches.compromised.length === 0
+                  ? `All ${breaches.checkedCount} password(s) clean in HIBP`
+                  : `${breaches.compromised.length} password(s) exposed in public data breaches!`}
+              </Text>
+              {breaches.compromised.map((b) => {
+                const it = items.find((x) => x.id === b.id);
+                return it ? (
+                  <View key={b.id} style={{ marginTop: 8 }}>
+                    <Row item={it} onOpen={onOpen} note={`Seen ${b.count.toLocaleString()}×`} />
+                  </View>
+                ) : null;
+              })}
+            </Card>
+          ) : null}
+        </View>
+      )}
+
       {(audit.locked > 0 || audit.recovered > 0) && (
         <View style={{ marginTop: 16 }}>
           <Banner icon="warning-outline" color={c.danger}
@@ -95,7 +144,34 @@ export default function Health({ onOpen }: { onOpen: (id: string) => void }) {
             body={audit.locked
               ? "These were encrypted with an older key. Re-encrypt to restore them if the key is still available on the server."
               : "Re-encrypt these entries with the current key to finish the recovery."} />
-          {!offline && <Button title="Re-encrypt with current key" icon="refresh" loading={busy} onPress={reencrypt} />}
+          {!offline && (
+            <View style={{ gap: 10 }}>
+              <Button title="Re-encrypt with current key" icon="refresh" loading={busy} onPress={() => void reencrypt()} />
+              {audit.locked > 0 && (
+                <Card style={{ gap: 8 }}>
+                  <Text style={{ color: c.text, fontSize: 13, fontWeight: "800" }}>Manual Old Hex-Key Recovery</Text>
+                  <Text style={{ color: c.muted, fontSize: 11 }}>
+                    Paste your previous 64-char VAULT_ENCRYPTION_SECRET to rescue locked entries.
+                  </Text>
+                  <Field
+                    value={oldHexKey}
+                    onChangeText={setOldHexKey}
+                    placeholder="Old 64-character hex key..."
+                    secureTextEntry
+                    style={{ fontFamily: "monospace" }}
+                  />
+                  <Button
+                    title="Unlock & Re-encrypt with Old Key"
+                    variant="ghost"
+                    disabled={!oldHexKey.trim()}
+                    loading={busy}
+                    onPress={() => void reencrypt(oldHexKey)}
+                    style={{ height: 42 }}
+                  />
+                </Card>
+              )}
+            </View>
+          )}
         </View>
       )}
 

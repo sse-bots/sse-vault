@@ -12,6 +12,7 @@ import {
   shouldStoreHexcodeInDb,
 } from "@/lib/crypto";
 import type { StoredSecurityCode } from "@/lib/vault-types";
+import { logVaultActivity } from "@/lib/activity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -85,12 +86,23 @@ export async function POST(req: Request) {
       doc.encryptedNotes ? String(doc.encryptedNotes) : null,
       docHex
     );
+    const cf = tryDecode(
+      doc.encryptedCustomFields ? String(doc.encryptedCustomFields) : null,
+      docHex
+    );
+    const card = tryDecode(
+      doc.encryptedCardDetails ? String(doc.encryptedCardDetails) : null,
+      docHex
+    );
 
-    let anyFailed = pwd.failed || totp.failed || notes.failed;
+    let anyFailed =
+      pwd.failed || totp.failed || notes.failed || cf.failed || card.failed;
     let anyNeedsReencrypt =
       pwd.needsReencrypt ||
       totp.needsReencrypt ||
       notes.needsReencrypt ||
+      cf.needsReencrypt ||
+      card.needsReencrypt ||
       doc.keyFingerprint !== activeFingerprint ||
       (storeHex && docHex !== activeHex);
 
@@ -145,6 +157,18 @@ export async function POST(req: Request) {
       if (notes.value !== null) {
         updates.encryptedNotes = encryptSecretWithKey(notes.value, activeHex);
       }
+      if (cf.value !== null) {
+        updates.encryptedCustomFields = encryptSecretWithKey(
+          cf.value,
+          activeHex
+        );
+      }
+      if (card.value !== null) {
+        updates.encryptedCardDetails = encryptSecretWithKey(
+          card.value,
+          activeHex
+        );
+      }
       if (rawCodes.length > 0) {
         updates.securityCodes = nextCodes;
       }
@@ -152,6 +176,14 @@ export async function POST(req: Request) {
       await vaultItems.updateOne({ _id: doc._id }, { $set: updates });
       migratedCount += 1;
     }
+  }
+
+  if (migratedCount > 0) {
+    await logVaultActivity(
+      ctx.userId,
+      "reencrypt",
+      `Re-encrypted ${migratedCount} entry(ies) with active key`
+    );
   }
 
   return NextResponse.json({

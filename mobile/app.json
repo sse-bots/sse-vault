@@ -3,18 +3,40 @@
     "name": "SSE Vault",
     "slug": "sse-vault",
     "scheme": "ssevault",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "icon": "./assets/icon.png",
     "backgroundColor": "#09090b",
-    "splash": { "image": "./assets/splash.png", "resizeMode": "contain", "backgroundColor": "#09090b" },
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#09090b"
+    },
     "android": {
       "package": "com.sse.vault",
-      "adaptiveIcon": { "foregroundImage": "./assets/adaptive-icon.png", "backgroundColor": "#09090b" },
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#09090b"
+      },
       "allowBackup": false,
-      "permissions": ["USE_BIOMETRIC", "USE_FINGERPRINT"]
+      "permissions": ["USE_BIOMETRIC", "USE_FINGERPRINT", "CAMERA"]
     },
-    "plugins": ["expo-secure-store", "expo-local-authentication"]
+    "plugins": [
+      "expo-secure-store",
+      "expo-local-authentication",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow SSE Vault to scan 2FA authenticator QR codes."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow SSE Vault to read a TOTP QR screenshot from your gallery."
+        }
+      ]
+    ]
   }
 }

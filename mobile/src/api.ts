@@ -1,5 +1,13 @@
 import { API_BASE } from "./config";
-import type { ItemInput, PinStatus, VaultItem, VaultUser } from "./types";
+import type {
+  ActivityEvent,
+  Category,
+  ItemInput,
+  PinStatus,
+  TrashedItem,
+  VaultItem,
+  VaultUser,
+} from "./types";
 
 export const tokens: { session: string | null; pin: string | null } = {
   session: null,
@@ -56,8 +64,9 @@ export interface MeResponse {
 
 export const api = {
   me: () => request<MeResponse>("/api/me"),
-  exportText: async (format: "json" | "csv") => {
-    const res = await fetch(`${API_BASE}/api/vault/export?format=${format}`, {
+  exportText: async (format: "json" | "csv", ids?: string[]) => {
+    const q = ids && ids.length ? `&ids=${encodeURIComponent(ids.join(","))}` : "";
+    const res = await fetch(`${API_BASE}/api/vault/export?format=${format}${q}`, {
       headers: {
         "x-sse-client": "native",
         Authorization: `Bearer ${tokens.session}`,
@@ -67,24 +76,73 @@ export const api = {
     if (!res.ok) throw new ApiError("Export failed. Unlock the vault and try again.", res.status, null);
     return res.text();
   },
+  exportEncrypted: async (passphrase: string, ids?: string[]) => {
+    const res = await fetch(`${API_BASE}/api/vault/export`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-sse-client": "native",
+        Authorization: `Bearer ${tokens.session}`,
+        "x-vault-pin-token": tokens.pin || "",
+      },
+      body: JSON.stringify({ passphrase, ids }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => null);
+      throw new ApiError(j?.error || "Encrypted export failed.", res.status, j);
+    }
+    return res.text();
+  },
   importEntries: (body: unknown) =>
     request<any>("/api/vault/import", { method: "POST", body: JSON.stringify(body) }),
-  reencrypt: () => request<any>("/api/vault/reencrypt", { method: "POST", body: "{}" }),
-
+  reencrypt: (oldHexKey?: string) =>
+    request<{ ok: boolean; migratedCount: number; stillLockedCount: number }>(
+      "/api/vault/reencrypt",
+      {
+        method: "POST",
+        body: JSON.stringify(oldHexKey ? { oldHexKey } : {}),
+      }
+    ),
+  breachCheck: () =>
+    request<{
+      ok: boolean;
+      checkedCount: number;
+      compromised: Array<{ id: string; count: number }>;
+      checkedAt: string;
+    }>("/api/vault/breach-check", { method: "POST", body: "{}" }),
+  activity: async () =>
+    (await request<{ events: ActivityEvent[] }>("/api/vault/activity")).events,
+  trashList: async () =>
+    (await request<{ items: TrashedItem[] }>("/api/vault/trash")).items,
+  trashAction: (body: { action: "restore" | "delete" | "empty"; id?: string }) =>
+    request<any>("/api/vault/trash", { method: "POST", body: JSON.stringify(body) }),
+  bulk: (body: { action: "trash"; ids: string[] } | { action: "category"; ids: string[]; category: Category }) =>
+    request<{ ok: boolean; updatedCount: number }>("/api/vault/bulk", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  createShare: (itemId: string, expiresMinutes: "10" | "60" | "1440") =>
+    request<{ ok: boolean; url: string; expiresAt: string }>("/api/vault/share", {
+      method: "POST",
+      body: JSON.stringify({ itemId, expiresMinutes }),
+    }),
   logout: () => request("/api/auth/logout", { method: "POST" }).catch(() => null),
-
   pin: (body: Record<string, unknown>) =>
     request<{ ok: boolean; pinStatus: PinStatus; pinToken?: string }>("/api/vault/pin", {
       method: "POST",
       body: JSON.stringify(body),
     }),
-
-  items: async () =>
-    (await request<{ items: VaultItem[] }>("/api/vault")).items,
+  items: async () => (await request<{ items: VaultItem[] }>("/api/vault")).items,
   createItem: (body: ItemInput) =>
-    request<{ ok: boolean; item?: VaultItem; addedToExistingGroup?: boolean }>("/api/vault", { method: "POST", body: JSON.stringify(body) }),
+    request<{ ok: boolean; item?: VaultItem; addedToExistingGroup?: boolean }>("/api/vault", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   updateItem: (id: string, body: ItemInput) =>
-    request<{ ok: boolean; item?: VaultItem }>(`/api/vault/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    request<{ ok: boolean; item?: VaultItem }>(`/api/vault/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
   deleteItem: (id: string) => request(`/api/vault/${id}`, { method: "DELETE" }),
   toggleCode: (id: string, codeId: string, used: boolean) =>
     request(`/api/vault/${id}/codes`, {

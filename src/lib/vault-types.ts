@@ -1,4 +1,5 @@
 export type VaultAuthType = "password" | "oauth";
+export type VaultEntryType = "login" | "note" | "card";
 
 export type VaultCategory =
   | "personal"
@@ -17,9 +18,7 @@ export type VaultDecryptionStatus =
 
 export interface VaultSecurityCodeDTO {
   id: string;
-  /** Plaintext code when unused & decoded; null when used or locked */
   code: string | null;
-  /** Exact-length dash mask ("-------") matching the code's character length */
   masked: string;
   length: number;
   used: boolean;
@@ -27,19 +26,37 @@ export interface VaultSecurityCodeDTO {
   locked: boolean;
 }
 
+export interface VaultCustomFieldDTO {
+  id: string;
+  label: string;
+  value: string;
+  hidden: boolean;
+}
+
+export interface VaultCardDetailsDTO {
+  cardholderName: string;
+  cardNumber: string;
+  expiry: string;
+  cvv: string;
+  billingZip: string;
+}
+
+export interface VaultPasswordHistoryDTO {
+  password: string | null;
+  changedAt: string;
+  locked: boolean;
+}
+
 export interface VaultItemDTO {
   id: string;
+  entryType: VaultEntryType;
   domainKey: string;
   appName: string;
   label: string;
   url: string;
-  /** "password" (standard login) or "oauth" (Sign in with Google/GitHub/Discord/etc.) */
   authType: VaultAuthType;
-  /** Provider name when authType === "oauth" (e.g. "Google", "GitHub", "Discord") */
   oauthProvider: string | null;
-  /** Canonical root domain of the OAuth provider (e.g. "google.com", "github.com") */
   oauthProviderDomain: string | null;
-  /** Exact vault_items._id of the parent provider account when linked inside SSE Vault */
   oauthLinkedItemId: string | null;
   category: VaultCategory;
   hasPasskey: boolean;
@@ -48,12 +65,15 @@ export interface VaultItemDTO {
   password: string | null;
   totpSecret: string | null;
   securityCodes: VaultSecurityCodeDTO[];
+  customFields: VaultCustomFieldDTO[];
+  cardDetails: VaultCardDetailsDTO | null;
+  passwordHistory: VaultPasswordHistoryDTO[];
   notes: string | null;
   favorite: boolean;
   keyFingerprint: string | null;
-  /** Only non-"ok" when VAULT_ENCRYPTION_SECRET changed and couldn't directly decode this entry */
   decryptionStatus: VaultDecryptionStatus;
   hasStoredHexcode: boolean;
+  deletedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -64,13 +84,28 @@ export interface StoredSecurityCode {
   length: number;
   used: boolean;
   usedAt: Date | null;
-  /** Optional per-code hexcode fallback if appended after a secret rotation */
   hexcode?: string | null;
+}
+
+export interface StoredPasswordHistoryItem {
+  encryptedPassword: string;
+  changedAt: Date | string;
+  hexcode?: string | null;
+}
+
+export interface VaultActivityDTO {
+  id: string;
+  event: string;
+  label: string;
+  client: "web" | "native";
+  userAgent: string | null;
+  createdAt: string;
 }
 
 export interface VaultAppGroupSummary {
   domainKey: string;
   appName: string;
+  entryTypes: VaultEntryType[];
   accountCount: number;
   oauthCount: number;
   totpCount: number;

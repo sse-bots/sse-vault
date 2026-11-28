@@ -4,11 +4,13 @@ import { Suspense, useEffect } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  Download,
   ExternalLink,
   KeyRound,
   LogIn,
   ShieldAlert,
   ShieldCheck,
+  Smartphone,
 } from "lucide-react";
 import { useVault } from "@/components/VaultContext";
 
@@ -117,6 +119,24 @@ function SignInInner() {
         </div>
       </div>
 
+      <Link
+        href="/apk"
+        className="vault-card-interactive mt-4 flex items-center justify-between gap-3 rounded-2xl px-4 py-3.5"
+      >
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-500">
+            <Smartphone className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <div className="vault-text-primary text-xs font-extrabold">Use SSE Vault on Android</div>
+            <div className="vault-text-muted truncate text-[11px]">Download the official native Android APK</div>
+          </div>
+        </div>
+        <span className="inline-flex shrink-0 items-center gap-1 rounded-xl bg-amber-500 px-3 py-1.5 text-[11px] font-extrabold text-zinc-950">
+          <Download className="h-3.5 w-3.5" />
+          APK
+        </span>
+      </Link>
     </div>
   );
 }

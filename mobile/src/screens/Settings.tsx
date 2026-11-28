@@ -40,7 +40,7 @@ const AUTO_LOCK: { m: number; label: string }[] = [
   { m: 60, label: "1 hour" },
 ];
 
-export default function Settings({ onImport }: { onImport: () => void }) {
+export default function Settings({ onImport, onTrash }: { onImport: () => void; onTrash: () => void }) {
   const {
     user,
     pinStatus,
@@ -66,10 +66,42 @@ export default function Settings({ onImport }: { onImport: () => void }) {
   const [offlineOn, setOfflineOn] = useState(true);
   const [pin, setPin] = useState("");
   const [checking, setChecking] = useState(false);
+  const [encModal, setEncModal] = useState(false);
+  const [encPass, setEncPass] = useState("");
+  const [encBusy, setEncBusy] = useState(false);
+  const [activity, setActivity] = useState<ActivityEvent[]>([]);
 
   useEffect(() => {
     void isOfflineEnabled().then(setOfflineOn);
-  }, []);
+    if (!offline) {
+      void api.activity().then(setActivity).catch(() => {});
+    }
+  }, [offline]);
+
+  const doEncryptedExport = async () => {
+    if (encPass.trim().length < 6) {
+      Alert.alert("Short passphrase", "Passphrase must be at least 6 characters.");
+      return;
+    }
+    setEncBusy(true);
+    try {
+      const text = await api.exportEncrypted(encPass.trim());
+      const stamp = new Date().toISOString().slice(0, 10);
+      const uri = `${FileSystem.cacheDirectory}sse-vault-encrypted-${stamp}.ssevault`;
+      await FileSystem.writeAsStringAsync(uri, text);
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { mimeType: "application/json" });
+      }
+      await FileSystem.deleteAsync(uri, { idempotent: true });
+      setEncPass("");
+      setEncModal(false);
+      toast.show("Encrypted .ssevault exported!");
+    } catch (e) {
+      Alert.alert("Export failed", (e as Error).message);
+    } finally {
+      setEncBusy(false);
+    }
+  };
 
   const onBioPin = async (v: string) => {
     setPin(v);
@@ -324,6 +356,31 @@ export default function Settings({ onImport }: { onImport: () => void }) {
           />
         )}
 
+        <SectionTitle>Recent Security Activity</SectionTitle>
+        <Card style={{ gap: 8 }}>
+          {activity.length === 0 ? (
+            <Text style={{ color: c.muted, fontSize: 12 }}>
+              {offline ? "Reconnect to view security activity." : "No recent events yet."}
+            </Text>
+          ) : (
+            activity.slice(0, 10).map((ev) => (
+              <View
+                key={ev.id}
+                style={{
+                  borderBottomWidth: 1,
+                  borderBottomColor: c.border,
+                  paddingBottom: 6,
+                }}
+              >
+                <Text style={{ color: c.text, fontSize: 12, fontWeight: "700" }}>{ev.label}</Text>
+                <Text style={{ color: c.faint, fontSize: 10, marginTop: 2 }}>
+                  {ev.client === "native" ? "Android APK" : "Web"} · {new Date(ev.createdAt).toLocaleString()}
+                </Text>
+              </View>
+            ))
+          )}
+        </Card>
+
         <SectionTitle>About</SectionTitle>
         <Card style={{ padding: 0 }}>
           <SettingsRow
@@ -403,6 +460,27 @@ export default function Settings({ onImport }: { onImport: () => void }) {
         onClose={() => setPinModal(false)}
         onDone={() => toast.show("PIN changed")}
       />
+      <Modal visible={encModal} transparent animationType="fade" onRequestClose={() => setEncModal(false)}>
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.72)", justifyContent: "center", padding: 20 }}>
+          <Card style={{ gap: 10 }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <Text style={{ color: c.text, fontSize: 16, fontWeight: "800" }}>Encrypted .ssevault Backup</Text>
+              <IconButton icon="close" onPress={() => setEncModal(false)} />
+            </View>
+            <Text style={{ color: c.muted, fontSize: 12 }}>
+              Protected with AES-256-GCM + PBKDF2. Remember this passphrase to restore later.
+            </Text>
+            <Field
+              label="BACKUP PASSPHRASE (MIN 6 CHARS)"
+              value={encPass}
+              onChangeText={setEncPass}
+              placeholder="Choose a strong passphrase..."
+              secureTextEntry
+            />
+            <Button title="Export Encrypted Backup" icon="lock-closed-outline" loading={encBusy} onPress={doEncryptedExport} />
+          </Card>
+        </View>
+      </Modal>
       <Toast message={toast.msg} />
     </View>
   );

@@ -7,6 +7,8 @@ import {
   Download,
   FileJson,
   FileSpreadsheet,
+  KeyRound,
+  Lock,
   Loader2,
   ShieldCheck,
   Upload,
@@ -56,6 +58,11 @@ export function VaultImportExportModal() {
   const [checking, setChecking] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [encryptedRawFile, setEncryptedRawFile] = useState<string | null>(null);
+  const [encryptedFileName, setEncryptedFileName] = useState<string>("");
+  const [importPassphrase, setImportPassphrase] = useState("");
+  const [exportPassphrase, setExportPassphrase] = useState("");
+  const [exportingEncrypted, setExportingEncrypted] = useState(false);
 
   const [fileName, setFileName] = useState<string | null>(null);
   const [detectedFormat, setDetectedFormat] = useState<string | null>(null);
@@ -77,6 +84,9 @@ export function VaultImportExportModal() {
     setParsedEntries([]);
     setPreviewRows([]);
     setSummary(null);
+    setEncryptedRawFile(null);
+    setEncryptedFileName("");
+    setImportPassphrase("");
     setError(null);
     setResultMsg(null);
     if (fileRef.current) fileRef.current.value = "";
@@ -94,6 +104,19 @@ export function VaultImportExportModal() {
     try {
       // Read purely in browser memory — file is never uploaded to disk
       const text = await file.text();
+      const trimmed = text.trim();
+      if (
+        file.name.toLowerCase().endsWith(".ssevault") ||
+        (trimmed.startsWith("{") && trimmed.includes('"sse-vault-encrypted"'))
+      ) {
+        setEncryptedRawFile(trimmed);
+        setEncryptedFileName(file.name);
+        setSummary(null);
+        setPreviewRows([]);
+        return;
+      }
+      setEncryptedRawFile(null);
+      setEncryptedFileName("");
       const parsed = parsePasswordImportFile(file.name, text);
       if (parsed.entries.length === 0) {
         setError("No valid password entries were found in that file.");
@@ -135,7 +158,93 @@ export function VaultImportExportModal() {
     }
   }
 
+  async function handleUnlockEncryptedImport(
+    mode: "preview" | "commit",
+    strat = conflictStrategy
+  ) {
+    if (!encryptedRawFile || !importPassphrase.trim()) {
+      setError("Enter the backup passphrase for this .ssevault file.");
+      return;
+    }
+    setError(null);
+    if (mode === "preview") setChecking(true);
+    else setCommitting(true);
+    try {
+      const res = await fetch("/api/vault/import", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode,
+          conflictStrategy: strat,
+          encryptedBackup: encryptedRawFile,
+          passphrase: importPassphrase,
+        }),
+      });
+      const j = await res.json();
+      if (!res.ok) {
+        setError(j.error || "Could not unlock encrypted backup.");
+        return;
+      }
+      if (mode === "preview") {
+        setDetectedFormat("SSE Vault Encrypted (.ssevault)");
+        setSummary(j.summary);
+        setPreviewRows(j.rows || []);
+      } else {
+        await refreshVault();
+        showToast(
+          `Imported ${j.importedCount || 0} new, updated ${j.updatedCount || 0}, skipped ${j.skippedCount || 0}.`
+        );
+        closeImportExportModal();
+      }
+    } catch {
+      setError("Network error while processing encrypted backup.");
+    } finally {
+      setChecking(false);
+      setCommitting(false);
+    }
+  }
+
+  async function handleEncryptedExport() {
+    if (exportPassphrase.trim().length < 6) {
+      setError("Backup passphrase must be at least 6 characters.");
+      return;
+    }
+    setError(null);
+    setExportingEncrypted(true);
+    try {
+      const res = await fetch("/api/vault/export", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ passphrase: exportPassphrase.trim() }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setError(j.error || "Could not create encrypted backup.");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `sse-vault-encrypted-${new Date().toISOString().slice(0, 10)}.ssevault`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setExportPassphrase("");
+      showToast("Encrypted .ssevault backup downloaded!");
+    } catch {
+      setError("Network error while exporting encrypted backup.");
+    } finally {
+      setExportingEncrypted(false);
+    }
+  }
+
   async function handleCommitImport() {
+    if (encryptedRawFile) {
+      await handleUnlockEncryptedImport("commit", conflictStrategy);
+      return;
+    }
     if (parsedEntries.length === 0) return;
     setCommitting(true);
     setError(null);
@@ -246,7 +355,47 @@ export function VaultImportExportModal() {
 
           {tab === "import" ? (
             <div className="space-y-4">
-              {!summary ? (
+              {encryptedRawFile && !summary ? (
+                <div className="vault-inset space-y-3 rounded-2xl p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-xs font-extrabold text-emerald-500">
+                      <Lock className="h-4 w-4" />
+                      Encrypted Backup Loaded: {encryptedFileName}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEncryptedRawFile(null);
+                        setImportPassphrase("");
+                      }}
+                      className="vault-text-muted text-[11px] font-bold hover:text-rose-500"
+                    >
+                      Change file
+                    </button>
+                  </div>
+                  <p className="vault-text-muted text-[11px]">
+                    Enter the passphrase you used when exporting this <code>.ssevault</code> archive to preview and import it.
+                  </p>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <input
+                      type="password"
+                      value={importPassphrase}
+                      onChange={(e) => setImportPassphrase(e.target.value)}
+                      placeholder="Enter backup passphrase..."
+                      className="vault-input min-w-0 flex-1 rounded-xl px-3.5 py-2.5 text-xs"
+                    />
+                    <button
+                      type="button"
+                      disabled={checking || !importPassphrase.trim()}
+                      onClick={() => handleUnlockEncryptedImport("preview")}
+                      className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-amber-500 px-4 py-2.5 text-xs font-extrabold text-zinc-950 hover:bg-amber-400 disabled:opacity-50"
+                    >
+                      {checking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}
+                      Decrypt &amp; Preview
+                    </button>
+                  </div>
+                </div>
+              ) : !summary ? (
                 <>
                   <div
                     onDragOver={(e) => {
@@ -454,6 +603,36 @@ export function VaultImportExportModal() {
             </div>
           ) : (
             /* EXPORT TAB */
+            <div className="space-y-3.5">
+              <div className="space-y-3 rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-sm font-extrabold text-emerald-500">
+                    <Lock className="h-5 w-5" />
+                    Encrypted Backup (.ssevault) · Recommended
+                  </div>
+                  <p className="vault-text-secondary text-xs leading-relaxed">
+                    AES-256-GCM encrypted with your custom passphrase (PBKDF2 120,000 rounds). Safe to store anywhere — restorable on both Web and the SSE Vault Android app.
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <input
+                    type="password"
+                    value={exportPassphrase}
+                    onChange={(e) => setExportPassphrase(e.target.value)}
+                    placeholder="Choose backup passphrase (min 6 chars)..."
+                    className="vault-input min-w-0 flex-1 rounded-xl px-3.5 py-2.5 text-xs"
+                  />
+                  <button
+                    type="button"
+                    disabled={exportingEncrypted || exportPassphrase.trim().length < 6}
+                    onClick={handleEncryptedExport}
+                    className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-xs font-extrabold text-zinc-950 hover:bg-emerald-400 disabled:opacity-50"
+                  >
+                    {exportingEncrypted ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                    Download .ssevault
+                  </button>
+                </div>
+              </div>
             <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
               <div className="vault-inset flex flex-col justify-between gap-4 rounded-2xl p-4">
                 <div className="space-y-1.5">
@@ -496,6 +675,7 @@ export function VaultImportExportModal() {
                   Download Universal CSV
                 </a>
               </div>
+            </div>
             </div>
           )}
         </div>
